@@ -1,0 +1,1370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ground Assault — v2</title>
+<style>
+  html,body{margin:0;background:#05060a;color:#cfe8ff;font-family:'Courier New',monospace;overflow:hidden;}
+  #wrap{display:flex;flex-direction:column;align-items:center;padding:14px;}
+  h1{font-size:15px;letter-spacing:1px;margin:0 0 4px;color:#8ff0ff;}
+  .tag{font-size:11px;color:#7a95b0;margin-bottom:10px;max-width:960px;text-align:center;line-height:1.5;}
+  canvas{background:#05060a;border:2px solid #2a3a55;box-shadow:0 0 24px rgba(80,180,255,0.15);image-rendering:pixelated;}
+  #hud{display:flex;justify-content:space-between;width:960px;font-size:12px;margin-top:6px;color:#7a95b0;}
+  #itemsLabel{color:#ffd76b;}
+  #speedCtl{display:flex;align-items:center;gap:5px;}
+  #speedSelect{background:#0b1524;color:#8ff0ff;border:1px solid #2a3a55;border-radius:3px;font-family:'Courier New',monospace;font-size:12px;padding:1px 3px;}
+  #speedSelect:focus{outline:2px solid #8ff0ff;outline-offset:1px;}
+  #legend{width:960px;font-size:11px;color:#5c7284;margin-top:6px;line-height:1.6;}
+  kbd{background:#132038;border:1px solid #2a3a55;border-radius:3px;padding:1px 5px;color:#8ff0ff;}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>GROUND ASSAULT — v2 (chosen direction, revised)</h1>
+  <div class="tag">Persistent Defender-style world. Roamers hunt humanoids, run bombing raids on your buildings, and shoot at you &mdash; no Invaders formations. Walk, climb ladders that carry you up onto rooftops, explore interiors, then board your ship and take to the air &mdash; land it anywhere you could walk, ground or rooftop. Gunfire no longer scars buildings, and by default your ship flies safely past them too. Collect superbombs and fire-suppressant tanks from rooftops to fight back and repair any bomb damage.</div>
+  <canvas id="c" width="960" height="540"></canvas>
+  <div id="hud"><span id="score">SCORE 0</span><span id="lives">SHIPS 3</span><span id="modeLabel">ON FOOT</span><span id="itemsLabel"></span><span id="speedCtl">SIM <select id="speedSelect" title="Simulation speed — for faster testing"><option value="1">1x</option><option value="2">2x</option><option value="4">4x</option><option value="8">8x</option></select></span></div>
+  <div id="legend">
+    <b>On foot:</b> <kbd>&larr;</kbd><kbd>&rarr;</kbd> run (incl. rooftops) &nbsp; <kbd>&uarr;</kbd> climb ladder &nbsp; <kbd>&darr;</kbd> climb down / enter door / exit interior &nbsp; <kbd>SPACE</kbd> shoot straight up (hits bombs too) &nbsp; <kbd>A</kbd> board ship &nbsp; <kbd>S</kbd> detonate a carried superbomb (clears every roamer on screen) &nbsp; <kbd>F</kbd> apply a carried fire-suppressant tank (fully repairs a nearby damaged building) &nbsp;
+    <b>In flight:</b> <kbd>&larr;</kbd><kbd>&rarr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd> thrust &nbsp; <kbd>SPACE</kbd> fire in short bursts (pauses to cool down) &nbsp; <kbd>S</kbd> detonate a carried superbomb &nbsp; <kbd>A</kbd> to land anywhere you could walk &mdash; open ground or a building rooftop, or descend low enough to drop off a rescued human &nbsp;
+    <b>Pickups:</b> superbombs and fire-suppressant tanks occasionally appear on rooftops &mdash; walk over one on foot to collect it &nbsp;
+    <b>Testing:</b> <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd> set sim speed to 1x/2x/4x/8x (runs the game logic faster than real time so you don't have to wait around)
+  </div>
+</div>
+<script>
+(function(){
+'use strict';
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const W = 960, H = 540, GROUND_Y = 460, WORLD_W = 4800;
+// the lowest altitude the ship can hold while actually flying (see updateFlight's clamp) — shared
+// with updateFallingCaptives so the "ship drops off a carried human at its lowest point" check uses
+// the exact same floor, instead of an independent magic number that can silently drift out of sync.
+const MIN_FLIGHT_ALT_Y = GROUND_Y - 45;
+const scoreEl = document.getElementById('score'), livesEl = document.getElementById('lives'), modeEl = document.getElementById('modeLabel'), itemsEl = document.getElementById('itemsLabel');
+
+// ---- simulation speed control (for quicker manual testing — runs game logic in substeps so
+// everything, including frame-based bullet motion, scales together instead of drifting out of sync) ----
+const speedSelect = document.getElementById('speedSelect');
+let simSpeed = 1;
+const SIM_SPEEDS = [1,2,4,8];
+function setSimSpeed(n){
+  simSpeed = SIM_SPEEDS.includes(n) ? n : 1;
+  speedSelect.value = String(simSpeed);
+}
+speedSelect.addEventListener('change', () => setSimSpeed(parseInt(speedSelect.value,10)));
+
+const keys = {};
+window.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+  if(['Digit1','Digit2','Digit3','Digit4'].includes(e.code)) setSimSpeed(SIM_SPEEDS[Number(e.code.slice(-1))-1]);
+});
+window.addEventListener('keyup', e => { keys[e.code] = false; });
+
+function wrapX(x){ x = x % WORLD_W; if(x<0) x += WORLD_W; return x; }
+function wrapDelta(a,b){ let d=(b-a+WORLD_W/2)%WORLD_W - WORLD_W/2; if(d<-WORLD_W/2) d+=WORLD_W; return d; }
+function relX(camX, worldX){ let dx = ((worldX - camX + WORLD_W/2) % WORLD_W + WORLD_W) % WORLD_W - WORLD_W/2; return W/2 + dx; }
+
+// Building styles: each has a base body color (lerped toward red as it takes damage — same for all
+// styles) plus its own window/accent color and rendering treatment (see drawBuilding).
+const BUILDING_STYLES = {
+  block:     { base:[35,54,80],  window:[74,106,143], accent:[92,127,168] },
+  tower:     { base:[45,42,70],  window:[150,120,210], accent:[180,150,230] },
+  warehouse: { base:[58,56,48],  window:[150,138,88],  accent:[184,160,90] },
+  tenement:  { base:[46,58,52],  window:[118,148,110], accent:[150,178,130] },
+  house:     { base:[70,48,38],  window:[210,190,130], accent:[150,90,60] },
+};
+
+// config: whether flying the ship into a building costs a life and damages it (the logic is kept
+// intact below, just gated behind this flag). Defaults to false per Mike's request — by default the
+// ship simply flies in front of/through buildings unharmed, no collision at all. Flip to true to
+// restore the old ramming-has-consequences behavior.
+const RAM_DAMAGES_BUILDINGS = false;
+
+const BUILDING_MAX_HP = 10;
+const HOLE_RADIUS = 28; // 4x the original 7px hole radius, per Mike's request
+const HOLE_MARGIN = HOLE_RADIUS - 1; // keep hole centers clamped so the (much bigger) circle still reads as contained within the building's silhouette
+function makeBuilding(x, width, height, style){
+  return { x, width, height, style, hasLadder:true, hp:BUILDING_MAX_HP, maxHp:BUILDING_MAX_HP, destroyed:false, holes:[] };
+}
+const buildings = [
+  makeBuilding(260,  90,  90,  'block'),
+  makeBuilding(550,  80,  70,  'house'),
+  makeBuilding(850,  70,  200, 'tower'),
+  makeBuilding(1150, 75,  65,  'house'),
+  makeBuilding(1450, 170, 60,  'warehouse'),
+  makeBuilding(2050, 110, 130, 'tenement'),
+  makeBuilding(2650, 130, 140, 'block'),
+  makeBuilding(3200, 80,  240, 'tower'),
+  makeBuilding(3500, 85,  75,  'house'),
+  makeBuilding(3800, 130, 55,  'warehouse'),
+  makeBuilding(4350, 95,  100, 'tenement'),
+  makeBuilding(4600, 70,  60,  'house'),
+];
+const shipPad = {x: 60, y: GROUND_Y};
+
+// humans are scattered uniformly across the whole world rather than clustered in front of any
+// particular building, per Mike's request. makeHumanoid is shared by the initial spawn as well as
+// the falling-captive rescue/survive paths below so every humanoid object carries the same fields.
+function makeHumanoid(x){ return { x, alive:true, fleeing:false, targetBuilding:null, safe:false, counted:false }; }
+const HUMANOID_COUNT = 10;
+const humanoids = [];
+for(let i=0;i<HUMANOID_COUNT;i++) humanoids.push(makeHumanoid(wrapX(Math.random()*WORLD_W)));
+
+let mode = 'foot'; // 'foot' | 'interior' | 'flight'
+const foot = { x: shipPad.x, y: GROUND_Y - 20, w:10, h:20, vx:0, facing:1, climbing:false, ladderRef:null, roofRef:null, invuln:0, animPhase:0, superbombCount:0, fireSuppressantCount:0, hidden:false };
+const ship = { x: shipPad.x, y: shipPad.y - 8, w:26, h:12, vx:0, vy:0, facing:1, alive:true, invuln:0, airborne:false, parkedOn:null };
+let interior = { building:null, px:40, py:150 };
+let camX = foot.x;
+let score = 0, lives = 3, gameOver = false;
+
+// ---- scoring: single choke point so every score change is clamped at zero (negative scores are
+// never allowed, per Mike's request) instead of every call site having to remember to clamp itself ----
+function addScore(delta){
+  score = Math.max(0, score + delta);
+  scoreEl.textContent = 'SCORE ' + score;
+}
+
+// ---- session-storage high scores: top 10 kept across games in this browser tab/session ----
+const HIGH_SCORE_KEY = 'groundAssaultHighScores';
+function loadHighScores(){
+  try{ const list = JSON.parse(localStorage.getItem(HIGH_SCORE_KEY)); return Array.isArray(list) ? list : []; }
+  catch(e){ return []; }
+}
+function saveHighScore(finalScore){
+  const list = loadHighScores();
+  list.push(finalScore);
+  list.sort((a,b) => b-a);
+  const top = list.slice(0,10);
+  try{ localStorage.setItem(HIGH_SCORE_KEY, JSON.stringify(top)); } catch(e){}
+  return top;
+}
+let finalHighScores = null;
+
+// ---- humanoid loss accounting: a single choke point so a human is only ever scored/counted once,
+// even if (e.g.) an already-abducted captive is later also caught in a building-destruction blast ----
+function loseHumanoid(h, kind){ // kind: 'abducted' | 'killed'
+  if(h.counted) return;
+  h.counted = true;
+  addScore(-50);
+  if(kind === 'abducted') civAbductionsThisWave++;
+  else civDeathsThisWave++;
+}
+
+// ---- roamer waves: wave 1 releases 10 roamers total, each subsequent wave adds 5 more, capped at
+// 45. Roamers aren't all released at once — they trickle in 1 at a time early on, ramping up to 3 at
+// a time by wave 7. A wave is "cleared" (and the next one begins) once every roamer that belonged to
+// it is gone, however that happened — shot down, superbombed, rammed, or successfully escaping off
+// the top of the screen with a captive. ----
+const WAVE_WORDS = ['ZERO','ONE','TWO','THREE','FOUR','FIVE','SIX','SEVEN','EIGHT','NINE','TEN'];
+function waveWord(n){ return WAVE_WORDS[n] || String(n); }
+function waveQuotaFor(wave){ return Math.min(10 + 5*(wave-1), 45); }
+function waveReleaseRateFor(wave){ return Math.min(3, Math.round(1 + (wave-1)/3)); }
+let waveNumber = 1;
+let waveQuota = waveQuotaFor(waveNumber);
+let waveSpawned = 0, waveResolved = 0;
+let waveComplete = false, waveCompleteTimer = 0, waveStatsToShow = null;
+let civDeathsThisWave = 0, civAbductionsThisWave = 0;
+function releaseWaveRoamers(){
+  const n = Math.min(waveReleaseRateFor(waveNumber), waveQuota - waveSpawned);
+  for(let i=0;i<n;i++) spawnRoamer();
+  waveSpawned += n;
+}
+function triggerWaveComplete(){
+  waveComplete = true;
+  waveStatsToShow = { number: waveNumber, deaths: civDeathsThisWave, abductions: civAbductionsThisWave };
+  waveCompleteTimer = 3.0;
+  addScore(500); // flat per-wave bonus (Mike specified 500 for wave one; no growth formula was given, so every wave awards the same flat bonus — flag this for confirmation)
+}
+function updateWaveTransition(dt){
+  if(!waveComplete) return;
+  waveCompleteTimer -= dt;
+  if(waveCompleteTimer <= 0){
+    waveNumber++;
+    waveQuota = waveQuotaFor(waveNumber);
+    waveSpawned = 0; waveResolved = 0;
+    civDeathsThisWave = 0; civAbductionsThisWave = 0;
+    waveComplete = false; waveStatsToShow = null;
+  }
+}
+
+// ---- humans: flee toward the nearest building's door once a roamer locks onto them as a target; if
+// they make it, they're marked safe and can no longer be targeted/abducted ----
+function updateHumanoids(dt){
+  const FLEE_SPEED = 70;
+  for(const h of humanoids){
+    if(!h.alive || h.safe) continue;
+    if(!h.fleeing){
+      const hunter = roamers.find(r => r.alive && r.target === h);
+      if(hunter){
+        h.fleeing = true;
+        h.targetBuilding = nearestBuilding(h.x).b;
+      }
+    }
+    if(!h.fleeing) continue;
+    if(!h.targetBuilding || h.targetBuilding.destroyed){
+      h.fleeing = false; h.targetBuilding = null;
+      continue;
+    }
+    const doorX = h.targetBuilding.x - h.targetBuilding.width/2 + 14;
+    const dx = wrapDelta(h.x, doorX);
+    h.x = wrapX(h.x + Math.sign(dx)*Math.min(Math.abs(dx), FLEE_SPEED*dt));
+    if(Math.abs(dx) < 4){
+      h.safe = true; h.fleeing = false;
+      for(const r of roamers) if(r.target === h) r.target = null;
+    }
+  }
+}
+
+// ---- respawn sequence: on death, gameplay freezes so the explosion plays out undisturbed, then a
+// "lives left" message holds for a couple seconds before the next life actually starts ----
+let respawn = null; // null | { stage:'debris'|'showLives', timer, mode:'flight'|'foot' }
+
+// the sprite's y is its TOP edge; feet sit at y + foot.h. Standing height on any surface = surfaceY - foot.h.
+function roofStandY(b){ return (GROUND_Y - b.height) - foot.h; }
+
+// the ship can land anywhere the player could walk — open ground, or a building rooftop if it's
+// actually up at roof height over that building's footprint (not just passing underneath it at
+// street level, which is equally "walkable" but a different surface). Picks whichever candidate
+// surface (ground, or any non-destroyed building whose footprint contains x) is vertically closest
+// to the ship, so approaching low glides in over the ground even under a tall building, while
+// approaching at rooftop height settles onto the roof.
+function landingSurfaceAt(x, y){
+  let best = { topY: GROUND_Y, roofRef: null, dist: Math.abs(y - (GROUND_Y - 8)) };
+  for(const b of buildings){
+    if(b.destroyed) continue;
+    if(Math.abs(wrapDelta(x, b.x)) >= b.width/2) continue;
+    const roofY = GROUND_Y - b.height;
+    const dist = Math.abs(y - (roofY - 8));
+    if(dist < best.dist) best = { topY: roofY, roofRef: b, dist };
+  }
+  return best;
+}
+
+// ---- roamers: hunt humanoids, and periodically run a bombing raid on a building ----
+let roamers = [];
+function spawnRoamer(){
+  // spawn off the top of the screen (not already hovering mid-air) and descend into its hunting altitude.
+  // biased near the current camera so the descent is actually visible reasonably often, not buried deep
+  // in unseen world space.
+  roamers.push({
+    x: wrapX(camX + (Math.random()<0.5?-1:1) * (250+Math.random()*550)),
+    y: -20 - Math.random()*80,
+    descending: true, descendTargetY: 200+Math.random()*120,
+    alive:true,
+    target:null, phase:Math.random()*10, wanderDir: Math.random()<0.5?-1:1,
+    bombTimer: 4+Math.random()*5, bombing:false, bombTargetX:null, bombTargetY:null, bombTargetBuilding:null, bombDropped:false, bombLinger:0, // shortened from 6-16s so bombing runs happen often enough to actually be visible in a typical session
+    shootTimer: 1+Math.random()*2.5
+  });
+}
+releaseWaveRoamers();
+let roamerRespawn = 4;
+
+// ---- bombs dropped by roamers on buildings — the player can shoot them down before impact ----
+let bombs = [];
+
+// ---- roamer gunfire: straight left/right shots at whichever mode the player is in ----
+let enemyBullets = [];
+
+// ---- falling captives: if a roamer carrying an abducted human is shot down (or superbombed), the
+// human doesn't just vanish with it — they fall toward the ground. Flying the ship underneath one
+// before it lands "catches" it: it then rides along beneath the ship until the ship comes in low
+// enough to drop it off safely, becoming a normal humanoid again. Only one rides at a time. ----
+let fallingCaptives = [];
+function spawnFallingCaptive(x, y){
+  fallingCaptives.push({ x, y, startY: y, vy: 10, followShip:false }); // half the original 20 — see updateFallingCaptives for the matching gravity halving
+}
+// a fall of 2 building "stories" or less is survivable — the captive gets up and rejoins as a normal
+// (free) humanoid right where they landed instead of dying. ~25px/story, so ~50px total.
+const STORY_HEIGHT = 25;
+const SURVIVABLE_FALL_DIST = STORY_HEIGHT * 2;
+function updateFallingCaptives(dt){
+  let carrying = fallingCaptives.some(c => c.followShip);
+  for(const c of fallingCaptives){
+    if(c.followShip){
+      c.x = ship.x; c.y = ship.y + 14;
+      // the ship "drops off" a carried captive once it's down at its lowest flyable point —
+      // MIN_FLIGHT_ALT_Y is the same floor the flight-altitude clamp in updateFlight enforces, so
+      // this reliably fires whenever the ship is hovering as low as it can go while still flying
+      // (mode stays 'flight' right up until an actual landing transition happens).
+      if(mode==='flight' && ship.alive && ship.y >= MIN_FLIGHT_ALT_Y - 1){
+        humanoids.push(makeHumanoid(c.x));
+        addScore(50);
+        spawnDebris(c.x, GROUND_Y-10, '#8fffb0', 8);
+        c.rescued = true; carrying = false;
+      }
+      continue;
+    }
+    // half the original 220 gravity accel — falls at half speed throughout so there's more time
+    // to fly over and catch them before they hit the ground, per Mike's request
+    c.vy += 110*dt;
+    c.y += c.vy*dt;
+    if(!carrying && mode==='flight' && ship.alive && Math.abs(wrapDelta(ship.x,c.x)) < 18 && Math.abs(ship.y-c.y) < 18){
+      c.followShip = true; carrying = true;
+    }
+    if(c.y >= GROUND_Y - 4){
+      const fallDist = (GROUND_Y - 4) - c.startY;
+      if(fallDist <= SURVIVABLE_FALL_DIST){
+        // short fall — they're shaken but fine, and simply rejoin as a free humanoid. No score
+        // penalty here: they were already scored as an abduction the moment they were grabbed, and
+        // this isn't a death, so nothing further is deducted (see loseHumanoid).
+        humanoids.push(makeHumanoid(c.x));
+        spawnDebris(c.x, GROUND_Y-4, '#8fffb0', 6);
+        c.survived = true;
+      } else {
+        c.lost = true;
+        spawnDebris(c.x, GROUND_Y-4, '#ffd76b', 6);
+      }
+    }
+  }
+  fallingCaptives = fallingCaptives.filter(c => !c.rescued && !c.lost && !c.survived);
+}
+
+// ---- small fading fragments for destroyed roamers and explosions ----
+let debris = [];
+function spawnDebris(x, y, color, count){
+  for(let i=0;i<count;i++){
+    const ang = Math.random()*Math.PI*2, spd = 40+Math.random()*100;
+    debris.push({ x, y, vx: Math.cos(ang)*spd, vy: Math.sin(ang)*spd - 50, life: 0.5+Math.random()*0.4, maxLife: 0.9, color });
+  }
+}
+function updateDebris(dt){
+  for(const d of debris){ d.x += d.vx*dt; d.y += d.vy*dt; d.vy += 220*dt; d.life -= dt; }
+  debris = debris.filter(d => d.life > 0);
+}
+
+// ---- rooftop pickups: superbombs (clear every roamer on screen) and fire-suppressant tanks
+// (fully repair a nearby damaged building). Both are foot-only items — walk over one on a
+// rooftop to collect it. Carried as a small stash (up to MAX_CARRY of each), not a strict single
+// boolean — a boolean meant walking over a pickup while already holding one of that type was a
+// silent no-op (the item just sat there, collected=false, forever), which read as a real bug:
+// "sometimes I can't pick up items, I just walk past them." Now every rooftop pickup is always
+// collectible up to the stash cap. ----
+const MAX_CARRY = 3;
+let pickups = [];
+let pickupSpawnTimer = 8 + Math.random()*8;
+let superbombFlash = 0;
+function spawnPickup(){
+  const candidates = buildings.filter(b => !b.destroyed && !pickups.some(p=>p.building===b));
+  if(!candidates.length) return;
+  const b = candidates[Math.floor(Math.random()*candidates.length)];
+  pickups.push({ type: Math.random()<0.5 ? 'superbomb' : 'firesuppressant', x: b.x, building: b });
+}
+function updatePickups(dt){
+  pickupSpawnTimer -= dt;
+  if(pickupSpawnTimer <= 0 && pickups.length < 3){
+    spawnPickup();
+    pickupSpawnTimer = 10 + Math.random()*12;
+  }
+  // a pickup sitting on a building that gets destroyed goes down with it
+  pickups = pickups.filter(p => !p.building.destroyed);
+
+  if(mode==='foot' && foot.roofRef){
+    for(const p of pickups){
+      if(p.building !== foot.roofRef || Math.abs(wrapDelta(foot.x, p.x)) >= 10) continue;
+      if(p.type==='superbomb' && foot.superbombCount < MAX_CARRY){ foot.superbombCount++; p.collected = true; }
+      else if(p.type==='firesuppressant' && foot.fireSuppressantCount < MAX_CARRY){ foot.fireSuppressantCount++; p.collected = true; }
+    }
+    pickups = pickups.filter(p => !p.collected);
+  }
+
+  if(superbombFlash > 0) superbombFlash -= dt;
+}
+
+// superbomb: destroys every roamer currently visible on screen, buildings are untouched
+function useSuperbomb(){
+  let count = 0;
+  for(const r of roamers){
+    if(!r.alive) continue;
+    const sx = relX(camX, r.x);
+    if(sx > -20 && sx < W+20){
+      r.alive = false;
+      spawnDebris(r.x, r.y, '#c98bff', 8);
+      if(r.carrying) spawnFallingCaptive(r.x, r.y);
+      count++;
+    }
+  }
+  roamers = roamers.filter(r=>r.alive);
+  // superbomb kills remove roamers from the array immediately (unlike a bullet kill, which just
+  // flags r.alive=false and lets the next updateRoamers pass count/filter it) — so this needs to
+  // credit the wave-resolved count itself, or a superbombed wave could never register as cleared.
+  if(!waveComplete) waveResolved += count;
+  if(count>0) addScore(count*25);
+  superbombFlash = 0.35;
+}
+
+// fire-suppressant: fully repairs whichever damaged building the player is on/nearest to —
+// only consumed if it actually finds a valid damaged target, so it's never wasted
+function useFireSuppressant(){
+  const {b,d} = nearestBuilding(foot.x);
+  if(!b || b.destroyed || b.hp >= b.maxHp) return;
+  const nearEnough = foot.roofRef === b || d < b.width/2 + 20;
+  if(!nearEnough) return;
+  b.hp = b.maxHp;
+  b.holes = [];
+  spawnDebris(b.x, GROUND_Y - b.height/2, '#8fffb0', 10);
+  foot.fireSuppressantCount--;
+}
+
+// ---- bullets: player-only now. No wraparound; culled 200px past the screen edge ----
+let playerBullets = [];
+let shootCooldown = 0, footShootCooldown = 0;
+// the ship's gun fires in short bursts rather than a continuous stream — BURST_SIZE rounds at the
+// normal rate, then a forced COOLDOWN_TIME pause (even if the player keeps holding SPACE) before it
+// can fire again, per Mike's request.
+const SHIP_BURST_SIZE = 3, SHIP_BURST_INTERVAL = 0.1, SHIP_COOLDOWN_TIME = 0.5;
+let shipBurstCount = 0, shipCoolingDown = 0;
+
+function shootShip(){
+  if(mode!=='flight' || !ship.alive) return;
+  playerBullets.push({x: ship.x + ship.facing*16, y: ship.y, vx: ship.facing*18, vy:0, up:false, trail:[]});
+}
+function shootFoot(){
+  playerBullets.push({x: foot.x, y: foot.y-4, vx:0, vy:-11, up:true, trail:[]});
+}
+
+// the board/land toggle needs a fresh keypress, not "key is currently down" — otherwise a normal
+// human keypress (held for more than one tick) lands the ship, then immediately re-boards it on the
+// very next tick because shipDist is 0 the instant foot.x snaps to ship.x, making it look like A
+// "doesn't work" to get out. Tracked once per real frame (even while paused) so it never desyncs.
+let keyAWasDown = false;
+function update(dt){
+  const keyANow = !!keys['KeyA'];
+  const keyAJustPressed = keyANow && !keyAWasDown;
+  keyAWasDown = keyANow;
+  if(gameOver) return;
+  // the world doesn't pause just because the player did — roamers keep hunting/bombing/departing,
+  // bombs keep falling, pickups keep spawning, right through the death explosion and "SHIP LOST"
+  // overlay. Only the player's own input handling is suspended (nothing to control — they're
+  // hidden/destroyed) until the next life actually starts.
+  if(respawn) handleRespawnSequence(dt);
+  else if(mode === 'foot') updateFoot(dt, keyAJustPressed);
+  else if(mode === 'interior') updateInterior(dt);
+  else if(mode === 'flight') updateFlight(dt, keyAJustPressed);
+
+  updateRoamers(dt);
+  updateHumanoids(dt);
+  updateWaveTransition(dt);
+  updateBombs(dt);
+  updatePickups(dt);
+  updateFallingCaptives(dt);
+  updateDebris(dt);
+  updateBullets();
+  checkCollisions();
+  updateHud();
+}
+
+function updateHud(){
+  modeEl.textContent = mode==='flight' ? 'FLIGHT' : mode==='interior' ? 'INSIDE BUILDING' : foot.climbing ? 'CLIMBING' : foot.roofRef ? 'ON ROOFTOP' : 'ON FOOT';
+  const carried = [];
+  if(foot.superbombCount>0) carried.push('SUPERBOMB x'+foot.superbombCount+' (S)');
+  if(foot.fireSuppressantCount>0) carried.push('FOAM x'+foot.fireSuppressantCount+' (F)');
+  itemsEl.textContent = carried.join('   ');
+}
+
+function nearestBuilding(x){
+  let best=null,bd=1e9;
+  for(const b of buildings){ const d=Math.abs(wrapDelta(x,b.x)); if(d<bd){bd=d;best=b;} }
+  return {b:best,d:bd};
+}
+
+function updateFoot(dt, keyAJustPressed){
+  if(foot.invuln>0) foot.invuln -= dt;
+
+  // shooting straight up works in every on-foot substate (ground, rooftop, even mid-climb)
+  if(footShootCooldown>0) footShootCooldown -= dt;
+  if(keys['Space'] && footShootCooldown<=0){ shootFoot(); footShootCooldown = 0.22; }
+
+  // carried items — usable from any on-foot substate; each is consumed on a successful use
+  // (the fire-suppressant check bails out with no effect, and no consumption, if there's no
+  // valid damaged building nearby, so it's never wasted on a bad press)
+  if(keys['KeyS'] && foot.superbombCount>0){ useSuperbomb(); foot.superbombCount--; }
+  if(keys['KeyF'] && foot.fireSuppressantCount>0){ useFireSuppressant(); }
+
+  const speed = 154; // 110 * 1.4 — on-foot movement is 40% faster than the original prototype
+
+  if(foot.climbing){
+    foot.vx = 0;
+    if(keys['ArrowUp']) foot.y -= speed*0.7*dt;
+    if(keys['ArrowDown']) foot.y += speed*0.7*dt;
+    const b = foot.ladderRef;
+    const roofStand = roofStandY(b), groundStand = GROUND_Y - foot.h;
+    // ladder extends past the roofline (see drawBuilding), so climbing tops out with feet ON the roof, not hanging in front of the top floor
+    if(foot.y <= roofStand){ foot.y = roofStand; foot.climbing = false; foot.roofRef = b; }
+    if(foot.y >= groundStand){ foot.y = groundStand; foot.climbing = false; foot.roofRef = null; }
+    camX = foot.x;
+    return;
+  }
+
+  if(foot.roofRef){
+    const b = foot.roofRef;
+    foot.vx = 0;
+    if(keys['ArrowLeft']){ foot.vx=-speed; foot.facing=-1; }
+    if(keys['ArrowRight']){ foot.vx=speed; foot.facing=1; }
+    foot.animPhase = foot.vx !== 0 ? foot.animPhase + dt*15 : 0;
+    const proposed = wrapX(foot.x + foot.vx*dt);
+    const margin = 6;
+    let d = wrapDelta(b.x, proposed);
+    d = Math.max(-(b.width/2-margin), Math.min(b.width/2-margin, d));
+    foot.x = wrapX(b.x + d);
+    foot.y = roofStandY(b);
+    camX = foot.x;
+    const ladderDist = Math.abs(wrapDelta(foot.x, b.x));
+    if(ladderDist < 14 && keys['ArrowDown']){ foot.climbing = true; foot.ladderRef = b; foot.roofRef = null; }
+    // NOTE: falls through to the shared boarding check below (no early return here) — the ship can
+    // now be parked on a rooftop, so a player standing up there needs to be able to reboard it too.
+  } else {
+    foot.vx = 0;
+    if(keys['ArrowLeft']){ foot.vx=-speed; foot.facing=-1; }
+    if(keys['ArrowRight']){ foot.vx=speed; foot.facing=1; }
+    foot.animPhase = foot.vx !== 0 ? foot.animPhase + dt*15 : 0;
+    foot.x = wrapX(foot.x + foot.vx*dt);
+    foot.y = GROUND_Y-20;
+    camX = foot.x;
+
+    const {b,d} = nearestBuilding(foot.x);
+    if(b && !b.destroyed && b.hasLadder && d < 14 && keys['ArrowUp']){ foot.climbing = true; foot.ladderRef = b; }
+
+    const doorDist = (b && !b.destroyed) ? Math.abs(wrapDelta(foot.x, b.x - b.width/2 + 14)) : 999;
+    if(b && !b.destroyed && doorDist < 10 && keys['ArrowDown']){
+      mode = 'interior'; interior.building = b; interior.px = 40; interior.py = 150;
+    }
+  }
+
+  // boarding — reachable from either the ground or a rooftop, wherever the ship happens to be
+  // parked (as long as the player isn't actively mid-climb on a ladder, which returns above).
+  // Must also be standing on the same surface the ship is parked on (both on the ground, or both on
+  // the same rooftop) — otherwise a small x-distance could false-positive board a ship parked on a
+  // rooftop from directly below it on the street, or vice versa.
+  const shipDist = Math.abs(wrapDelta(foot.x, ship.x));
+  if(!ship.airborne && shipDist < 16 && foot.roofRef === ship.parkedOn && keyAJustPressed){
+    mode = 'flight';
+    ship.x = foot.x; ship.vx = 0; ship.vy = 0; ship.airborne = true; // ship.y already holds the correct parked-surface rest height
+  }
+}
+
+function updateInterior(dt){
+  const speed = 100;
+  interior.px += (keys['ArrowRight']?1:0)*speed*dt - (keys['ArrowLeft']?1:0)*speed*dt;
+  interior.px = Math.max(10, Math.min(290, interior.px));
+  if(interior.px > 150 && interior.px < 230){
+    if(keys['ArrowRight']) interior.py -= speed*0.5*dt;
+    if(keys['ArrowLeft']) interior.py += speed*0.5*dt;
+  }
+  interior.py = Math.max(40, Math.min(150, interior.py));
+  if(interior.px < 20 && keys['ArrowDown']){
+    mode = 'foot';
+    foot.x = interior.building.x - interior.building.width/2 + 14;
+  }
+}
+
+function updateFlight(dt, keyAJustPressed){
+  if(!ship.alive) return;
+  // ship speed history: doubled from the original prototype, bumped for snappier handling, +50% top
+  // speed, and now slightly slower acceleration but a much higher top speed (170% of the prior
+  // practical top speed). Same acc/drag-equilibrium gotcha as before applies here — the ship's real
+  // cruising speed is v_ss = acc*dt*drag/(1-drag) at 60fps, NOT the maxV clamp (maxV is pure headroom).
+  // Old: acc=900, drag=0.985 -> v_ss ≈ 985px/s. New: acc trimmed to 800 (~11% weaker initial punch —
+  // the "slightly slower acceleration" part) while drag is raised much closer to 1 (0.985->0.9921),
+  // which is what actually drives the new equilibrium up to ≈1674px/s (985 * 1.70 — the "170% of
+  // current max speed" part). Raising drag alone would do that regardless of acc; the acc trim is
+  // there specifically so the ramp-up still feels a touch less punchy off the line, not just faster
+  // at the top end. maxV keeps the same ~13% headroom-above-equilibrium ratio as before (1110/985).
+  const acc = 800, drag = 0.9921, maxV = 1890;
+  if(keys['ArrowLeft']){ ship.vx -= acc*dt; ship.facing=-1; }
+  if(keys['ArrowRight']){ ship.vx += acc*dt; ship.facing=1; }
+  if(keys['ArrowUp']) ship.vy -= acc*dt;
+  if(keys['ArrowDown']) ship.vy += acc*dt;
+  ship.vx *= drag; ship.vy *= drag;
+  ship.vx = Math.max(-maxV, Math.min(maxV, ship.vx));
+  ship.vy = Math.max(-maxV, Math.min(maxV, ship.vy));
+  ship.x = wrapX(ship.x + ship.vx*dt);
+  ship.y += ship.vy*dt;
+  // keep the ship below the radar strip (drawn at y 14-32) — flying up into it used to make the
+  // ship visually get "stuck" behind/inside the minimap overlay. Lower bound matches the same
+  // minimum-altitude-above-ground the roamers now respect (GROUND_Y-45) — no zooming along at
+  // ground level under normal thrust. The actual landing snap below sets ship.y directly and
+  // bypasses this clamp, so touching down still works fine.
+  ship.y = Math.max(50, Math.min(MIN_FLIGHT_ALT_Y, ship.y));
+  camX = ship.x;
+
+  // burst-fire: BURST_SIZE shots at the normal rate, then a forced cooldown pause before the next
+  // burst can start, regardless of whether SPACE is still held down
+  if(shipCoolingDown > 0){
+    shipCoolingDown -= dt;
+    if(shipCoolingDown <= 0) shipBurstCount = 0;
+  } else {
+    if(shootCooldown>0) shootCooldown -= dt;
+    if(keys['Space'] && shootCooldown<=0){
+      shootShip();
+      shootCooldown = SHIP_BURST_INTERVAL;
+      shipBurstCount++;
+      if(shipBurstCount >= SHIP_BURST_SIZE) shipCoolingDown = SHIP_COOLDOWN_TIME;
+    }
+  }
+
+  // superbomb usable from the ship too now, not just on foot — same shared stash/effect
+  if(keys['KeyS'] && foot.superbombCount>0){ useSuperbomb(); foot.superbombCount--; }
+
+  // land anywhere the player could walk — the ground, or a building rooftop if the ship is actually
+  // up at roof height over it (not just passing underneath at street level). Tolerance widened from
+  // 30 to 40: with the ship's normal-flight altitude now floored at GROUND_Y-45 (see clamp above),
+  // the closest it can get to ground-level rest height (GROUND_Y-8) under its own thrust is 37px —
+  // a 30px tolerance would make ground landing literally unreachable. Rooftop landings (always well
+  // clear of that floor) aren't affected either way.
+  const surf = landingSurfaceAt(ship.x, ship.y);
+  if(keyAJustPressed && surf.dist < 40){
+    mode = 'foot';
+    foot.x = ship.x; foot.y = surf.topY - foot.h; foot.roofRef = surf.roofRef; foot.climbing = false;
+    ship.airborne = false; ship.vx = 0; ship.vy = 0; ship.y = surf.topY - 8; ship.parkedOn = surf.roofRef;
+    camX = foot.x;
+  }
+  if(ship.invuln>0) ship.invuln -= dt;
+}
+
+function updateRoamers(dt){
+  if(!waveComplete && waveSpawned < waveQuota){
+    roamerRespawn -= dt;
+    if(roamerRespawn <= 0){ releaseWaveRoamers(); roamerRespawn = 5+Math.random()*4; }
+  }
+  for(const r of roamers){
+    if(!r.alive) continue;
+    r.phase += dt;
+
+    if(r.descending){
+      r.y += 90*dt;
+      if(r.y >= r.descendTargetY){ r.y = r.descendTargetY; r.descending = false; }
+      continue; // just falling in — no combat/hunting until it's settled
+    }
+
+    // after grabbing a captive, climb up and off the top of the screen carrying them, instead of
+    // just popping out of existence at the building — climbs noticeably slower than a normal
+    // (uncumbered) roamer, per Mike's request, since it's now hauling someone. Escapes up and to
+    // one side (the direction picked once at capture time, see above) rather than straight up, with
+    // a little wobble layered on top for visual flair.
+    if(r.departing){
+      r.y -= 65*dt; // half the original 130 climb speed while carrying a captive
+      const escapeDir = r.escapeDir || 1; // fallback in case departing was ever set without going through the capture path above
+      r.x = wrapX(r.x + escapeDir*80*dt + Math.sin(r.phase*1.5)*4*dt); // 2x horizontal speed, per Mike's request
+      if(r.y < -40) r.alive = false;
+      continue;
+    }
+
+    if(!r.bombing) r.bombTimer -= dt;
+    if(!r.bombing && r.bombTimer <= 0){
+      r.bombing = true; r.bombDropped = false; r.bombLinger = 0;
+      // roamers will opportunistically target the player directly when they're out on foot,
+      // otherwise they pick a building at random
+      if(mode==='foot' && Math.random() < 0.5){
+        r.bombTargetBuilding = null;
+        r.bombTargetX = foot.x;
+        r.bombTargetY = GROUND_Y;
+      } else {
+        const bld = buildings[Math.floor(Math.random()*buildings.length)];
+        r.bombTargetBuilding = bld;
+        r.bombTargetX = bld.x;
+        r.bombTargetY = GROUND_Y - bld.height;
+      }
+    }
+
+    if(r.bombing){
+      // climb to a fixed bombing altitude well above any roofline so the drop has a long, reactable fall
+      const BOMB_ALT = 140;
+      const dx = wrapDelta(r.x, r.bombTargetX);
+      r.x = wrapX(r.x + Math.sign(dx)*120*dt); // 2x horizontal speed, per Mike's request
+      r.y += Math.sign(BOMB_ALT - r.y)*70*dt;
+      const linedUp = Math.abs(dx) < 10 && Math.abs(r.y-BOMB_ALT) < 10;
+      if(linedUp && !r.bombDropped){
+        bombs.push({ x: r.x, y: r.y, vy: 40, targetY: r.bombTargetY, targetBuilding: r.bombTargetBuilding });
+        r.bombDropped = true;
+      }
+      if(r.bombDropped){
+        r.bombLinger += dt;
+        if(r.bombLinger > 0.8){ r.bombing = false; r.bombTimer = 6+Math.random()*7; } // shortened from 9-18s, same reasoning as the initial timer above
+      }
+      continue; // skip humanoid-hunting (and gunfire) while on a bombing run
+    }
+
+    // strafing gunfire: fire a straight left/right shot at whatever the player currently is
+    r.shootTimer -= dt;
+    if(r.shootTimer <= 0){
+      const targetPos = mode==='flight' ? ship : (mode==='foot' ? foot : null);
+      if(targetPos){
+        const ddx = wrapDelta(r.x, targetPos.x);
+        if(Math.abs(ddx) < 480){
+          const dir = ddx >= 0 ? 1 : -1;
+          enemyBullets.push({ x: r.x, y: r.y, vx: dir*7, vy: 0 });
+          r.shootTimer = 1.6 + Math.random()*1.6;
+        } else {
+          r.shootTimer = 0.4; // out of range — check again soon
+        }
+      } else {
+        r.shootTimer = 0.6;
+      }
+    }
+
+    if(!r.target){
+      let best=null, bd=1e9;
+      for(const h of humanoids) if(h.alive && !h.safe){ const d=Math.abs(wrapDelta(r.x,h.x)); if(d<bd){ bd=d; best=h; } }
+      r.target = best;
+    }
+    if(r.target && (!r.target.alive || r.target.safe)) r.target = null;
+
+    if(r.target){
+      // reach down only as far as needed to snatch the captive — not all the way to ground level.
+      // diving to GROUND_Y-10 made roamers sitting ducks at an altitude where the player's ship was
+      // also flying, so collisions (and cheap deaths) happened constantly. Hovering well clear of the
+      // ground keeps the grab readable without parking roamers in the player's flight path.
+      const HUMANOID_Y = GROUND_Y - 45;
+      // a target can be anywhere in the world (nearest-living-humanoid search has no distance limit),
+      // so a roamer that just acquired one might be thousands of pixels away horizontally. Diving to
+      // HUMANOID_Y immediately meant it would then cruise the ENTIRE horizontal approach at near-ground
+      // altitude — exactly the "no cruising the ground" problem, just from the hunting path this time
+      // rather than the old lurch bug. Only commit to the low altitude once basically overhead; stay at
+      // a normal cruising altitude (TRANSIT_Y) for the horizontal transit otherwise.
+      const TRANSIT_Y = 200;
+      const NEAR_HORIZONTALLY = 80;
+      const dx = wrapDelta(r.x, r.target.x);
+      r.x = wrapX(r.x + Math.sign(dx)*60*dt); // 2x horizontal speed, per Mike's request
+      const overheadOfTarget = Math.abs(dx) < NEAR_HORIZONTALLY;
+      const diveTargetY = overheadOfTarget ? HUMANOID_Y : TRANSIT_Y;
+      // proportional (exponential-decay) approach never mathematically reaches zero — a tight few-
+      // pixel tolerance needs a fast enough closing rate to actually get there in a reasonable time,
+      // not the old lazy 0.6 rate that was tuned for a generous 20px tolerance. BUT a bare proportional
+      // term is unbounded: right when a roamer first acquires a target (often while still up at wander/
+      // bombing altitude, far above hover height) the gap is huge, so the raw term produced a big
+      // one-frame vertical snap — read as roamers "suddenly lurching downward." Clamped to a max
+      // vertical closing speed so it's a smooth dive in from any starting altitude, same as the
+      // horizontal 30px/s approach speed above.
+      const MAX_DIVE_SPEED = 60;
+      const dy = diveTargetY - r.y;
+      const climbSpeed = Math.sign(dy) * Math.min(Math.abs(dy)*3.5, MAX_DIVE_SPEED);
+      r.y += climbSpeed*dt + Math.sin(r.phase*2)*2*dt;
+      if(overheadOfTarget && Math.abs(dx) < 5 && Math.abs(r.y-HUMANOID_Y) < 5){
+        const captured = r.target;
+        captured.alive = false;
+        loseHumanoid(captured, 'abducted');
+        r.carrying = true; // drawn dangling beneath it while it climbs out (see drawRoamers)
+        r.departing = true;
+        // fly off up and to one side rather than straight up — chosen once per capture so it's a
+        // consistent diagonal escape, not an oscillation back to a net-zero drift
+        r.escapeDir = Math.random() < 0.5 ? -1 : 1;
+        r.target = null;
+      }
+    } else {
+      // no humanoids left to hunt — keep patrolling instead of hovering in place
+      if(Math.random() < dt*0.3) r.wanderDir *= -1;
+      r.x = wrapX(r.x + r.wanderDir*50*dt); // 2x horizontal speed, per Mike's request
+      r.y += Math.sin(r.phase*0.7)*6*dt;
+    }
+  }
+  separateRoamers(dt);
+  if(!waveComplete){
+    const removed = roamers.reduce((n,r) => n + (r.alive ? 0 : 1), 0);
+    waveResolved += removed;
+  }
+  roamers = roamers.filter(r=>r.alive);
+  if(!waveComplete && waveSpawned >= waveQuota && waveResolved >= waveQuota && roamers.length === 0){
+    triggerWaveComplete();
+  }
+}
+
+// if two roamers end up on top of each other (most often two idle wanderers settling at the same
+// spot), gently push them apart sideways so both stay individually visible instead of overlapping
+function separateRoamers(dt){
+  const SEP_DIST = 18, SEP_Y = 14;
+  for(let i=0;i<roamers.length;i++){
+    const a = roamers[i];
+    if(!a.alive || a.descending || a.departing) continue;
+    for(let j=i+1;j<roamers.length;j++){
+      const b = roamers[j];
+      if(!b.alive || b.descending || b.departing) continue;
+      const dx = wrapDelta(a.x,b.x);
+      if(Math.abs(dx) >= SEP_DIST || Math.abs(a.y-b.y) >= SEP_Y) continue;
+      const dir = dx >= 0 ? 1 : -1; // b sits on the +dir side of a
+      const push = (SEP_DIST - Math.abs(dx) + 1) * 30 * dt;
+      b.x = wrapX(b.x + dir*push);
+      a.x = wrapX(a.x - dir*push);
+    }
+  }
+}
+
+// bombs fall (with light gravity) toward their target — a building's roof, or straight at the ground
+// under an on-foot player. The player can shoot them down in flight, or from the ground/rooftop,
+// before they land. A bomb that lands on a building damages it exactly like player fire does.
+function updateBombs(dt){
+  for(const bm of bombs){
+    bm.vy += 60*dt;
+    bm.y += bm.vy*dt;
+  }
+  for(const bm of bombs){
+    if(bm.exploded) continue;
+    if(bm.y >= bm.targetY){
+      bm.exploded = true;
+      // capture blast-relevance BEFORE damaging the building — a destroying hit clears foot.roofRef,
+      // which would otherwise make us miss that the player was standing right there
+      const footWasOnThisRoof = bm.targetBuilding && foot.roofRef === bm.targetBuilding;
+      spawnDebris(bm.x, bm.targetY, bm.targetBuilding ? '#ff9a4d' : '#c98a4d', 10);
+      if(bm.targetBuilding) damageBuilding(bm.targetBuilding, bm.x, bm.targetY);
+      if(mode==='flight' && ship.alive && ship.invuln<=0 && Math.abs(wrapDelta(ship.x,bm.x))<30 && Math.abs(ship.y-bm.targetY)<30) loseLife();
+      if(mode==='foot' && !foot.hidden && foot.invuln<=0){
+        if(bm.targetBuilding){
+          if(footWasOnThisRoof && Math.abs(wrapDelta(foot.x,bm.x))<26) loseLife();
+        } else if(!foot.roofRef && !foot.climbing && Math.abs(wrapDelta(foot.x,bm.x))<26){
+          loseLife();
+        }
+      }
+    }
+  }
+  bombs = bombs.filter(bm=>!bm.exploded);
+}
+
+// bullets: straight-line motion, no world-wrap, culled once 200px past the visible screen edge.
+// Player bullets keep a long trail of recent positions for a persistent Defender-style streaking
+// bolt — the shot stays visible as a fading comet-tail for a while rather than a brief blip.
+const BULLET_TRAIL_LEN = 26;
+function updateBullets(){
+  for(const b of playerBullets){
+    b.trail.push({x: b.x, y: b.y});
+    if(b.trail.length > BULLET_TRAIL_LEN) b.trail.shift();
+    b.x += b.vx; b.y += b.vy;
+  }
+  playerBullets = playerBullets.filter(b => {
+    const sx = relX(camX, b.x);
+    return sx > -200 && sx < W+200 && b.y > -200 && b.y < H+200;
+  });
+  for(const b of enemyBullets){ b.x += b.vx; b.y += b.vy; }
+  enemyBullets = enemyBullets.filter(b => {
+    const sx = relX(camX, b.x);
+    return sx > -200 && sx < W+200 && b.y > -200 && b.y < H+200;
+  });
+}
+
+function checkCollisions(){
+  for(const r of roamers){
+    if(!r.alive) continue;
+    for(const b of playerBullets){
+      if(b.dead) continue;
+      if(Math.abs(wrapDelta(b.x,r.x)) < 10 && Math.abs(b.y-r.y) < 10){
+        r.alive = false; b.dead = true; addScore(25); // +25 per alien killed
+        spawnDebris(r.x, r.y, '#c98bff', 8);
+        if(r.carrying) spawnFallingCaptive(r.x, r.y);
+      }
+    }
+  }
+
+  for(const bm of bombs){
+    if(bm.exploded) continue;
+    for(const b of playerBullets){
+      if(b.dead) continue;
+      if(Math.abs(wrapDelta(b.x,bm.x)) < 9 && Math.abs(b.y-bm.y) < 9){
+        bm.exploded = true; b.dead = true; addScore(15);
+        spawnDebris(bm.x, bm.y, '#ffd24d', 8);
+      }
+    }
+  }
+  bombs = bombs.filter(bm=>!bm.exploded);
+
+  // player gunfire no longer damages buildings — it just passes through them harmlessly. The only
+  // way to damage a building yourself now is by ramming it with the ship (see below).
+  playerBullets = playerBullets.filter(b=>!b.dead);
+
+  if(mode==='flight' && ship.alive && ship.invuln<=0){
+    for(const r of roamers){
+      if(r.alive && Math.abs(wrapDelta(ship.x,r.x)) < 14 && Math.abs(ship.y-r.y) < 12){
+        // crashing into a roamer destroys both — the ship (loseLife, same as any other hit) and
+        // the roamer itself, same debris/falling-captive handling as a clean bullet kill
+        r.alive = false;
+        addScore(25); // +25 per alien killed — a ramming kill counts same as a shot-down one
+        spawnDebris(r.x, r.y, '#c98bff', 8);
+        if(r.carrying) spawnFallingCaptive(r.x, r.y);
+        loseLife();
+        break; // ship is destroyed/respawning now — no need to check the rest this tick
+      }
+    }
+    for(const eb of enemyBullets){
+      if(!eb.dead && Math.abs(wrapDelta(eb.x,ship.x)) < 11 && Math.abs(eb.y-ship.y) < 9){ eb.dead = true; loseLife(); }
+    }
+    // ramming a building: destroys the ship (same life-loss/respawn as any other hit) and damages
+    // the building it hit, using the same damage model bombs use — configurable, off by default
+    // (see RAM_DAMAGES_BUILDINGS above)
+    if(RAM_DAMAGES_BUILDINGS){
+      for(const bld of buildings){
+        if(bld.destroyed) continue;
+        const roofY = GROUND_Y - bld.height;
+        if(Math.abs(wrapDelta(ship.x,bld.x)) < bld.width/2 + 12 && ship.y > roofY - 6 && ship.y < GROUND_Y + 4){
+          damageBuilding(bld, ship.x, ship.y);
+          loseLife();
+          break;
+        }
+      }
+    }
+  }
+  if(mode==='foot' && !foot.hidden && foot.invuln<=0){
+    const footMidY = foot.y + foot.h/2;
+    for(const eb of enemyBullets){
+      if(!eb.dead && Math.abs(wrapDelta(eb.x,foot.x)) < 8 && Math.abs(eb.y-footMidY) < 12){ eb.dead = true; loseLife(); }
+    }
+  }
+  enemyBullets = enemyBullets.filter(eb=>!eb.dead);
+}
+
+function damageBuilding(b, hitX, hitY){
+  b.hp--;
+  // punch a permanent circular hole at the impact point (clamped inside the building's silhouette
+  // so a glancing hit near the edge still reads as a clean hole, not one hanging off the wall)
+  const roofY = GROUND_Y - b.height;
+  const holeDx = Math.max(-(b.width/2-HOLE_MARGIN), Math.min(b.width/2-HOLE_MARGIN, wrapDelta(b.x, hitX)));
+  const holeY = Math.max(roofY+HOLE_MARGIN, Math.min(GROUND_Y-HOLE_MARGIN, hitY));
+  b.holes.push({ dx: holeDx, y: holeY });
+  spawnDebris(hitX, hitY, '#9a8a78', 6);
+  if(b.hp <= 0){
+    b.destroyed = true;
+    addScore(-100); // -100 per building destroyed
+    spawnDebris(b.x, GROUND_Y - b.height/2, '#6a5a48', 16);
+    // any human still alive within 10px of the building (i.e. close enough that its footprint plus
+    // a 10px margin reaches them) goes down with it, per Mike's request
+    for(const h of humanoids){
+      if(h.alive && Math.abs(wrapDelta(h.x,b.x)) < b.width/2 + 10){
+        h.alive = false;
+        loseHumanoid(h, 'killed');
+      }
+    }
+    // if the player was on/climbing this building when it came down, drop them to the ground
+    if(foot.roofRef === b){ foot.roofRef = null; foot.y = GROUND_Y - foot.h; }
+    if(foot.ladderRef === b && foot.climbing){ foot.climbing = false; foot.y = GROUND_Y - foot.h; }
+  }
+}
+
+function loseLife(){
+  lives--; livesEl.textContent = 'SHIPS '+lives;
+  if(lives<=0){
+    gameOver = true;
+    finalHighScores = saveHighScore(score);
+    if(mode==='flight'){ spawnDebris(ship.x, ship.y, '#ffe08a', 16); ship.alive = false; }
+    else if(mode==='foot'){ spawnDebris(foot.x, foot.y+foot.h/2, '#ff8b5e', 16); foot.hidden = true; }
+    return;
+  }
+  // hide the destroyed ship/player and let the explosion play out — the next life doesn't actually
+  // start (see finishRespawn) until the debris has finished and the "lives left" pause has elapsed
+  if(mode==='flight'){
+    spawnDebris(ship.x, ship.y, '#ffe08a', 14);
+    ship.alive = false;
+  } else if(mode==='foot'){
+    spawnDebris(foot.x, foot.y+foot.h/2, '#ff8b5e', 14);
+    foot.hidden = true;
+  }
+  respawn = { stage:'debris', timer:0.9, mode };
+}
+
+// runs in place of the player's own input handling while a respawn is pending — the rest of update()
+// (roamers, bombs, bullets, debris, collisions) still runs every tick every tick as normal, this just
+// advances the stage timer and flips over to the next life once both stages complete
+function handleRespawnSequence(dt){
+  respawn.timer -= dt;
+  if(respawn.stage === 'debris' && respawn.timer <= 0){
+    respawn.stage = 'showLives';
+    respawn.timer = 2.0;
+  } else if(respawn.stage === 'showLives' && respawn.timer <= 0){
+    finishRespawn();
+  }
+}
+
+function finishRespawn(){
+  if(respawn.mode === 'flight'){
+    ship.x = shipPad.x; ship.y = shipPad.y-8; ship.vx = 0; ship.vy = 0; ship.invuln = 1.5; ship.alive = true; ship.parkedOn = null;
+  } else if(respawn.mode === 'foot'){
+    foot.hidden = false; foot.invuln = 1.5;
+  }
+  respawn = null;
+}
+
+// ---- render ---------------------------------------------------------
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  drawSky();
+  drawMountains();
+  if(mode==='interior'){ drawInterior(); drawRadar(); return; }
+  ctx.fillStyle = '#1b2a1f'; ctx.fillRect(0,GROUND_Y,W,H-GROUND_Y);
+  ctx.strokeStyle = '#3a5a3f'; ctx.beginPath(); ctx.moveTo(0,GROUND_Y); ctx.lineTo(W,GROUND_Y); ctx.stroke();
+  for(const b of buildings) drawBuilding(b);
+  drawPickups();
+  for(const h of humanoids) if(h.alive) drawHumanoid(h);
+  drawRoamers();
+  drawBombs();
+  drawDebris();
+  drawShip();
+  drawFallingCaptives();
+  if(mode==='foot') drawFootPlayer();
+  drawBullets();
+  if(superbombFlash > 0){
+    ctx.fillStyle = `rgba(200,150,255,${(superbombFlash/0.35)*0.4})`;
+    ctx.fillRect(0,0,W,H);
+  }
+  drawRadar();
+  if(respawn && respawn.stage === 'showLives'){
+    ctx.fillStyle = 'rgba(5,8,16,0.55)'; ctx.fillRect(0,0,W,H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ff8b5e'; ctx.font = 'bold 24px monospace';
+    ctx.fillText('SHIP LOST', W/2, H/2-14);
+    ctx.fillStyle = '#eaffff'; ctx.font = '16px monospace';
+    ctx.fillText('LIVES LEFT: ' + lives, W/2, H/2+16);
+    ctx.textAlign = 'left';
+  }
+  if(waveComplete && waveStatsToShow){
+    ctx.fillStyle = 'rgba(5,8,16,0.6)'; ctx.fillRect(0,0,W,H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#8ff0ff'; ctx.font = 'bold 24px monospace';
+    ctx.fillText('WAVE ' + waveWord(waveStatsToShow.number) + ' COMPLETE', W/2, H/2-30);
+    ctx.fillStyle = '#eaffff'; ctx.font = '15px monospace';
+    ctx.fillText('CIVILIANS ABDUCTED: ' + waveStatsToShow.abductions, W/2, H/2);
+    ctx.fillText('CIVILIANS KILLED: ' + waveStatsToShow.deaths, W/2, H/2+22);
+    ctx.textAlign = 'left';
+  }
+}
+
+function drawSky(){
+  const g = ctx.createLinearGradient(0,0,0,GROUND_Y);
+  g.addColorStop(0,'#050812'); g.addColorStop(1,'#0a1830');
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,GROUND_Y);
+  for(let i=0;i<40;i++){ const sx=(i*137+(camX*0.05))%W; ctx.fillStyle='rgba(255,255,255,'+(0.15+0.15*Math.sin(i))+')'; ctx.fillRect(sx,(i*53)%GROUND_Y,2,2); }
+}
+
+// two parallax mountain ranges behind the terrain — each is a deterministic sum of a few sine waves
+// (so the skyline is stable frame-to-frame, no per-frame randomness) sampled against camX scaled by
+// a layer-specific parallax factor well under 1, so both layers drift far slower than the foreground
+// buildings, and the two layers drift at different rates relative to each other for a sense of depth.
+function mountainRidge(sx, offset, freqScale){
+  const wx = sx + offset;
+  return Math.sin(wx*0.006*freqScale)*0.55 + Math.sin(wx*0.017*freqScale+2.1)*0.3 + Math.sin(wx*0.041*freqScale+5.4)*0.15;
+}
+function drawMountainLayer(baseY, amp, parallax, freqScale, color){
+  const offset = camX*parallax;
+  ctx.beginPath();
+  ctx.moveTo(0, H);
+  const step = 12;
+  for(let sx=0; sx<=W; sx+=step) ctx.lineTo(sx, baseY - mountainRidge(sx, offset, freqScale)*amp);
+  ctx.lineTo(W, baseY - mountainRidge(W, offset, freqScale)*amp);
+  ctx.lineTo(W, H);
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+function drawMountains(){
+  drawMountainLayer(GROUND_Y-28, 34, 0.15, 1.0, '#121c2e');  // far range: slow drift, low relief, muted
+  drawMountainLayer(GROUND_Y-6,  58, 0.32, 1.6, '#0d1424');  // near range: faster drift, taller peaks, darker
+}
+
+function drawBuilding(b){
+  const sx = relX(camX,b.x);
+  if(sx < -150 || sx > W+150) return;
+  const x0 = sx - b.width/2;
+  const roofY = GROUND_Y - b.height;
+
+  if(b.destroyed){
+    ctx.fillStyle = '#2a2420';
+    for(let i=0;i<8;i++) ctx.fillRect(x0+i*(b.width/8), GROUND_Y-6-((i%3)*8), b.width/8-2, 6+((i%3)*8));
+    return;
+  }
+
+  const styleCfg = BUILDING_STYLES[b.style] || BUILDING_STYLES.block;
+
+  // body color shifts from the style's base tone toward red as it takes hits; flashes bright red
+  // when one hit from destruction — same damage language regardless of building style
+  const t = Math.min(1, (b.maxHp - b.hp) / (b.maxHp - 1));
+  let bodyColor;
+  if(b.hp === 1 && Math.floor(performance.now()/150)%2===0){
+    bodyColor = '#ff4a4a';
+  } else {
+    const base = styleCfg.base, dmg = [168,40,40];
+    const r = Math.round(base[0] + (dmg[0]-base[0])*t);
+    const g = Math.round(base[1] + (dmg[1]-base[1])*t);
+    const bl = Math.round(base[2] + (dmg[2]-base[2])*t);
+    bodyColor = `rgb(${r},${g},${bl})`;
+  }
+  ctx.fillStyle = bodyColor; ctx.fillRect(x0, roofY, b.width, b.height);
+
+  const winColor = `rgb(${styleCfg.window.join(',')})`;
+  const accentColor = `rgb(${styleCfg.accent.join(',')})`;
+
+  if(b.style === 'warehouse'){
+    ctx.fillStyle = winColor;
+    for(let wy=roofY+8; wy<GROUND_Y-10; wy+=14) ctx.fillRect(x0+4, wy, b.width-8, 4);
+    ctx.fillStyle = '#0d1420';
+    ctx.fillRect(x0+b.width*0.14, GROUND_Y-26, b.width*0.2, 26);
+    ctx.fillRect(x0+b.width*0.62, GROUND_Y-26, b.width*0.2, 26);
+  } else if(b.style === 'tower'){
+    ctx.fillStyle = winColor;
+    for(let wy=roofY+14; wy<GROUND_Y-10; wy+=16) ctx.fillRect(x0+b.width/2-4, wy, 8, 8);
+    ctx.strokeStyle = accentColor;
+    ctx.beginPath(); ctx.moveTo(x0+b.width/2, roofY-3); ctx.lineTo(x0+b.width/2, roofY-16); ctx.stroke();
+    if(Math.floor(performance.now()/500)%2===0){
+      ctx.fillStyle = '#ff6a6a';
+      ctx.beginPath(); ctx.arc(x0+b.width/2, roofY-16, 2, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.fillStyle = '#0d1420'; ctx.fillRect(x0+b.width/2-8, GROUND_Y-24, 16, 24);
+  } else if(b.style === 'tenement'){
+    ctx.fillStyle = winColor;
+    for(let wy=roofY+10; wy<GROUND_Y-8; wy+=18)
+      for(let wx=x0+8; wx<x0+b.width-8; wx+=20) ctx.fillRect(wx,wy,8,10);
+    ctx.fillStyle = accentColor;
+    for(let wy=roofY+30; wy<GROUND_Y-10; wy+=36) ctx.fillRect(x0-3, wy, b.width+6, 3);
+    ctx.fillStyle = '#0d1420'; ctx.fillRect(x0+8, GROUND_Y-24, 16, 24);
+  } else if(b.style === 'house'){
+    // small house with a slanted (triangular) roof — purely a visual treatment; the walkable
+    // rooftop plane drawn below stays flat like every other style, same as the roof ledge/ladder
+    ctx.fillStyle = accentColor;
+    ctx.beginPath();
+    ctx.moveTo(x0-6, roofY);
+    ctx.lineTo(x0+b.width/2, roofY-22);
+    ctx.lineTo(x0+b.width+6, roofY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = winColor;
+    ctx.fillRect(x0+8, roofY+14, 10, 10);
+    ctx.fillRect(x0+b.width-18, roofY+14, 10, 10);
+    ctx.fillStyle = '#0d1420'; ctx.fillRect(x0+b.width/2-8, GROUND_Y-22, 16, 22);
+  } else { // 'block' — the original default look
+    ctx.fillStyle = winColor;
+    for(let wy=roofY+10; wy<GROUND_Y-8; wy+=18)
+      for(let wx=x0+8; wx<x0+b.width-8; wx+=20) ctx.fillRect(wx,wy,8,10);
+    ctx.fillStyle = '#0d1420'; ctx.fillRect(x0+8, GROUND_Y-24, 16, 24);
+  }
+
+  // permanent circular holes at every impact point — erase through everything drawn so far to
+  // reveal the sky/ground behind, then lay in a soft dark rim so it reads as a punched-through
+  // crater rather than a flat cutout
+  if(b.holes.length){
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    for(const h of b.holes){ ctx.beginPath(); ctx.arc(sx+h.dx, h.y, HOLE_RADIUS, 0, Math.PI*2); ctx.fill(); }
+    ctx.restore();
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    for(const h of b.holes){ ctx.beginPath(); ctx.arc(sx+h.dx, h.y, HOLE_RADIUS, 0, Math.PI*2); ctx.fill(); }
+  }
+
+  // walkable rooftop ledge
+  ctx.fillStyle = accentColor; ctx.fillRect(x0, roofY-3, b.width, 3);
+  if(b.hasLadder){
+    ctx.strokeStyle = '#8a8f9a';
+    const lx = sx + 4;
+    // ladder rises past the roofline so it visibly carries the player up and onto the rooftop,
+    // rather than stopping at the top floor's face
+    const ladderTop = roofStandY(b) - 10;
+    ctx.beginPath(); ctx.moveTo(lx-4,GROUND_Y); ctx.lineTo(lx-4,ladderTop); ctx.moveTo(lx+4,GROUND_Y); ctx.lineTo(lx+4,ladderTop); ctx.stroke();
+    for(let ly=GROUND_Y-6; ly>ladderTop; ly-=10){ ctx.beginPath(); ctx.moveTo(lx-4,ly); ctx.lineTo(lx+4,ly); ctx.stroke(); }
+  }
+}
+
+function drawHumanoid(h){
+  const sx = relX(camX,h.x);
+  if(sx<-20||sx>W+20) return;
+  // safe (reached a building door and can no longer be abducted) reads as a calmer green instead of
+  // the normal at-risk yellow — a quick visual confirmation of who's sheltered
+  ctx.fillStyle = h.safe ? '#8fffb0' : '#ffd76b';
+  ctx.fillRect(sx-2,GROUND_Y-14,4,14);
+  ctx.beginPath(); ctx.arc(sx,GROUND_Y-16,3,0,7); ctx.fill();
+}
+
+function drawRoamers(){
+  for(const r of roamers){
+    const sx = relX(camX,r.x);
+    if(sx<-20||sx>W+20) continue;
+    if(r.carrying){
+      // captive dangling beneath, visibly carried off as the roamer climbs out of view
+      ctx.fillStyle = '#ffd76b';
+      ctx.fillRect(sx-2, r.y+7, 4, 9);
+      ctx.beginPath(); ctx.arc(sx, r.y+5, 3, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,215,107,0.5)';
+      ctx.beginPath(); ctx.moveTo(sx, r.y+2); ctx.lineTo(sx, r.y-6); ctx.stroke();
+    }
+    ctx.fillStyle = '#c98bff';
+    ctx.beginPath(); ctx.moveTo(sx,r.y-7); ctx.lineTo(sx+10,r.y+6); ctx.lineTo(sx-10,r.y+6); ctx.closePath(); ctx.fill();
+  }
+}
+
+function drawShip(){
+  if(!ship.alive) return;
+  const sx = relX(camX,ship.x), sy = ship.y;
+  if(sx<-30||sx>W+30) return;
+  ctx.save(); ctx.translate(sx,sy); ctx.scale(ship.facing,1);
+  if(ship.invuln>0 && Math.floor(ship.invuln*20)%2===0) ctx.globalAlpha=0.3;
+  ctx.fillStyle = '#8ff0ff';
+  ctx.beginPath(); ctx.moveTo(-13,4); ctx.lineTo(13,0); ctx.lineTo(-13,-4); ctx.lineTo(-6,0); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function drawFootPlayer(){
+  if(foot.hidden) return;
+  const sx = relX(camX,foot.x);
+  if(foot.invuln>0 && Math.floor(foot.invuln*20)%2===0) ctx.globalAlpha=0.3;
+
+  const moving = foot.vx !== 0 && !foot.climbing;
+  const bodyH = 12, legH = foot.h - bodyH;
+  // simple running cycle: legs scissor opposite each other, torso bobs slightly on every stride —
+  // settles back to a neutral standing pose the instant the player stops
+  const swing = moving ? Math.sin(foot.animPhase) * 4.5 : 0;
+  const bob = moving ? Math.abs(Math.sin(foot.animPhase)) * 1.5 : 0;
+
+  ctx.fillStyle = '#ff8b5e';
+  ctx.fillRect(sx-4, foot.y-bob, 8, bodyH);
+  ctx.fillRect(sx-3+swing*0.6, foot.y+bodyH-bob, 3, legH);
+  ctx.fillRect(sx  -swing*0.6, foot.y+bodyH-bob, 3, legH);
+  ctx.fillStyle = '#ffd8c2'; ctx.fillRect(sx-3, foot.y-4-bob, 6, 6);
+  ctx.globalAlpha = 1;
+}
+
+function drawFallingCaptives(){
+  for(const c of fallingCaptives){
+    const sx = relX(camX, c.x);
+    if(sx<-20||sx>W+20) continue;
+    ctx.fillStyle = '#ffd76b';
+    ctx.fillRect(sx-2, c.y-7, 4, 14);
+    ctx.beginPath(); ctx.arc(sx, c.y-9, 3, 0, Math.PI*2); ctx.fill();
+    if(c.followShip){
+      // small tether line up to the ship so it's clear they're being carried, not just floating
+      ctx.strokeStyle = 'rgba(255,215,107,0.5)';
+      ctx.beginPath(); ctx.moveTo(sx, c.y-10); ctx.lineTo(sx, c.y-16); ctx.stroke();
+    }
+  }
+}
+
+function drawPickups(){
+  for(const p of pickups){
+    const b = p.building;
+    if(b.destroyed) continue;
+    const sx = relX(camX, p.x);
+    if(sx<-20||sx>W+20) continue;
+    const py = (GROUND_Y - b.height) - 7 + Math.sin(performance.now()/260 + p.x)*1.5;
+    if(p.type==='superbomb'){
+      ctx.fillStyle = '#2a1a3a';
+      ctx.beginPath(); ctx.arc(sx, py, 6, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#c98bff'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(sx, py, 6, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(sx+4, py-4); ctx.lineTo(sx+7, py-8); ctx.stroke();
+      ctx.lineWidth = 1;
+    } else {
+      ctx.fillStyle = '#c0392b'; ctx.fillRect(sx-4, py-6, 8, 12);
+      ctx.fillStyle = '#eaffff'; ctx.fillRect(sx-3, py-1, 6, 2); ctx.fillRect(sx-1, py-4, 2, 6);
+    }
+  }
+}
+
+function drawBombs(){
+  for(const bm of bombs){
+    const sx = relX(camX, bm.x);
+    // pulsing warning ring at the impact point, so it's readable before the bomb arrives — anchored
+    // to the target building if there is one, otherwise to the bomb's own ground-targeted x
+    const ringX = bm.targetBuilding ? bm.targetBuilding.x : bm.x;
+    const rsx = relX(camX, ringX);
+    if(rsx > -20 && rsx < W+20){
+      const pulse = 6 + 4*Math.sin(performance.now()/120);
+      ctx.strokeStyle = 'rgba(255,106,61,0.5)';
+      ctx.beginPath(); ctx.arc(rsx, bm.targetY, pulse, 0, Math.PI*2); ctx.stroke();
+    }
+    if(sx<-20||sx>W+20) continue;
+    ctx.fillStyle = '#ff6a3d';
+    ctx.beginPath(); ctx.arc(sx, bm.y, 5, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#ffb37a';
+    ctx.beginPath(); ctx.moveTo(sx,bm.y-5); ctx.lineTo(sx,bm.y-10); ctx.stroke();
+  }
+}
+
+function drawDebris(){
+  for(const d of debris){
+    const sx = relX(camX, d.x);
+    if(sx<-20||sx>W+20) continue;
+    ctx.globalAlpha = Math.max(0, d.life/d.maxLife);
+    ctx.fillStyle = d.color;
+    ctx.fillRect(sx-2, d.y-2, 4, 4);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawInterior(){
+  ctx.fillStyle = '#101826'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle = '#1c2a3f'; ctx.fillRect(40,60,880,360);
+  ctx.strokeStyle = '#3a5170'; ctx.strokeRect(40,60,880,360);
+  ctx.fillStyle = '#2c405c';
+  for(let i=0;i<6;i++) ctx.fillRect(150+i*13, 150-i*18, 13, 18+i*18);
+  ctx.fillStyle = '#7ec8ff'; ctx.font = '12px monospace';
+  ctx.fillText('INTERIOR (demo room) — press DOWN near left wall to exit', 60, 400);
+  ctx.fillText('Walk into the staircase (center) and hold RIGHT to go up, LEFT to come down', 60, 420);
+  const px = 60+interior.px*2.5, py = 100+interior.py;
+  ctx.fillStyle = '#ff8b5e'; ctx.fillRect(px-4,py-16,8,16);
+}
+
+function drawBullets(){
+  for(const b of playerBullets){
+    const sx = relX(camX,b.x);
+    if(sx>=-8 && sx<=W+8){
+      // long, slow-fading comet-tail behind the bolt — closer to the original Defender look than a
+      // quick blip. A square-root falloff keeps the older/farther segments relatively more visible
+      // instead of dropping off sharply right behind the head.
+      for(let i=0;i<b.trail.length;i++){
+        const tp = b.trail[i];
+        const tsx = relX(camX, tp.x);
+        const frac = (i+1)/b.trail.length;
+        ctx.globalAlpha = Math.pow(frac, 0.55) * 0.6;
+        ctx.fillStyle = '#8ff0ff';
+        if(b.up) ctx.fillRect(tsx-1, tp.y-4, 2, 8);
+        else ctx.fillRect(tsx-3, tp.y-1, 6, 2);
+      }
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#eaffff';
+      if(b.up) ctx.fillRect(sx-1, b.y-4, 2, 8);
+      else ctx.fillRect(sx-3, b.y-1, 6, 2);
+    }
+  }
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#ff5e7a';
+  for(const b of enemyBullets){
+    const sx = relX(camX,b.x);
+    if(sx<-4||sx>W+4) continue;
+    ctx.fillRect(sx-3, b.y-1, 6, 2);
+  }
+}
+
+function drawRadar(){
+  const rx=20, ry=14, rw=W-40, rh=18;
+  ctx.strokeStyle='#2a3a55'; ctx.strokeRect(rx,ry,rw,rh);
+  ctx.fillStyle='rgba(20,30,50,0.7)'; ctx.fillRect(rx,ry,rw,rh);
+  function mapX(wx){ return rx + (wrapX(wx)/WORLD_W)*rw; }
+  for(const b of buildings){ ctx.fillStyle = b.destroyed ? '#5a4a3a' : '#4a6a8f'; ctx.fillRect(mapX(b.x)-1,ry+2,2,rh-4); }
+  for(const h of humanoids) if(h.alive){ ctx.fillStyle='#ffd76b'; ctx.fillRect(mapX(h.x)-1,ry+3,2,2); }
+  for(const r of roamers) if(r.alive){ ctx.fillStyle='#c98bff'; ctx.fillRect(mapX(r.x)-1,ry+7,2,2); }
+  for(const bm of bombs){ ctx.fillStyle='#ff6a3d'; ctx.fillRect(mapX(bm.x)-1,ry+2,2,rh-4); }
+  ctx.fillStyle='#8ff0ff';
+  const px = mode==='flight' ? ship.x : foot.x;
+  ctx.fillRect(mapX(px)-2,ry+2,4,rh-4);
+  const vw=(W/WORLD_W)*rw;
+  ctx.strokeStyle='rgba(143,240,255,0.6)'; ctx.strokeRect(mapX(camX)-vw/2, ry, vw, rh);
+  if(gameOver){
+    ctx.textAlign='center';
+    ctx.fillStyle='#ff5e7a'; ctx.font='bold 28px monospace'; ctx.fillText('GAME OVER', W/2, H/2-72);
+    ctx.fillStyle='#eaffff'; ctx.font='15px monospace'; ctx.fillText('FINAL SCORE: ' + score, W/2, H/2-44);
+    ctx.fillStyle='#8ff0ff'; ctx.font='13px monospace'; ctx.fillText('HIGH SCORES', W/2, H/2-20);
+    const list = finalHighScores || loadHighScores();
+    ctx.fillStyle='#cfe8ff'; ctx.font='13px monospace';
+    for(let i=0;i<Math.min(5,list.length);i++) ctx.fillText((i+1)+'. '+list[i], W/2, H/2+2+i*16);
+    ctx.fillStyle='#7a95b0'; ctx.font='12px monospace';
+    ctx.fillText('refresh to retry', W/2, H/2+2+Math.min(5,list.length)*16+16);
+    ctx.textAlign='left';
+  }
+}
+
+let last = performance.now();
+function frame(t){
+  const dt = Math.min(0.033,(t-last)/1000); last=t;
+  // run `simSpeed` logic ticks per rendered frame, so testing at 2x/4x/8x compresses real time
+  // uniformly across dt-scaled physics AND frame-based bullet motion, rather than just scaling dt
+  // (which would speed up movement but leave bullets — a fixed distance per tick — unchanged).
+  for(let i=0;i<simSpeed;i++) update(dt);
+  draw();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

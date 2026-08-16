@@ -1,0 +1,235 @@
+classDiagram
+direction LR
+
+class Game {
+  +reset()
+  +addScore(delta)
+  +spawnDebris(x,y,color,count)
+  +spawnFallingCaptive(x,y)
+  +loseHumanoid(h,kind)
+  +killRoamer(r)
+  +killBomber(bo)
+  +nearestBuilding(x)
+  +landingSurfaceAt(x,y)
+  +useSuperbomb()
+  +useFireSuppressant()
+  +enterInterior(building)
+  +tryBoardOrLand()
+  +loseLife()
+  +finishRespawn()
+  +update(dt)
+  +updateHud()
+  +draw()
+  +start()
+}
+
+class Camera {
+  +follow(newX)
+  +reset(x)
+}
+
+class Input {
+  +isDown(code)
+  +setSimSpeed(n)
+}
+
+class Hud {
+  +setScore(score)
+  +setLives(lives)
+  +setMode(text)
+  +setItems(parts)
+}
+
+class HighScores {
+  +load()
+  +save(finalScore)
+}
+
+class Renderer {
+  +draw()
+  +drawShipLost(ctx,game)
+  +drawWaveComplete(ctx,game)
+  +drawGameOver(ctx,game)
+}
+
+class Backdrop {
+  +drawSky(ctx)
+  +drawMountains(ctx,camera)
+}
+
+class Radar {
+  +draw(ctx,game)
+}
+
+class WaveManager {
+  +word(n)$
+  +quotaFor(wave)$
+  +releaseRateFor(wave)$
+  +reset()
+  +recordCivDeath()
+  +recordCivAbduction()
+  +recordEnemyDestroyed(n)$
+  +recordResolved(n)
+  +releaseRoamers()
+  +tickRelease(dt)
+  +countResolved(roamers)
+  +checkComplete(aliveRoamers)
+  +triggerComplete()
+  +updateTransition(dt)
+}
+
+class CollisionSystem {
+  +run()
+}
+
+class RespawnSequence {
+  +update(dt)
+}
+
+class Building {
+  +hpFor(width,height)$
+  +standY(spriteH)
+  +containsX(x)
+  +repair()
+  +damage(hitX,hitY,game)
+  +draw(ctx,camera)
+}
+
+class Humanoid {
+  +startWanderingAwayFrom(building)
+  +updateAll(humanoids,dt,game)$
+  +update(dt,game)
+  +drawAll(humanoids,ctx,camera)$
+  +draw(ctx,camera)
+}
+
+class Pilot {
+  +reset(x)
+  +landAt(x,surface)
+  +dropFrom(building)
+  +shoot(game)
+  +update(dt,game)
+  +draw(ctx,camera)
+}
+
+class Ship {
+  +reset()
+  +respawnAirborne(x,y)
+  +board(x)
+  +beginLanding(surface)
+  +shoot(game)
+  +update(dt,game)
+  +draw(ctx,camera)
+}
+
+class Roamer {
+  +spawn(game)$
+  +updateAll(roamers,dt,game)$
+  +update(dt,game)
+  +easeTilts(roamers,dt)$
+  +separate(roamers,dt)$
+  +drawAll(roamers,ctx,camera)$
+  +draw(ctx,camera)
+}
+
+class Bomber {
+  +spawn(game)$
+  +updateAll(bombers,dt,game)$
+  +update(dt,game)
+  +drawAll(bombers,ctx,camera)$
+  +draw(ctx,camera)
+}
+
+class Bomb {
+  +updateAll(bombs,dt,game)$
+  +explode(game)
+  +drawAll(bombs,ctx,camera)$
+  +draw(ctx,camera)
+}
+
+class FallingCaptive {
+  +updateAll(captives,dt,game)$
+  +update(dt,game,carrying)
+  +drawAll(captives,ctx,camera)$
+  +draw(ctx,camera)
+}
+
+class DebrisField {
+  +clear()
+  +spawn(x,y,color,count)
+  +update(dt)
+  +draw(ctx,camera)
+}
+
+class PickupField {
+  +reset()
+  +spawn(game)
+  +update(dt,game)
+  +draw(ctx,camera)
+}
+
+class Pickup {
+  +draw(ctx,camera)
+}
+
+class ScorchField {
+  +clear()
+  +add(x,y)
+  +draw(ctx,camera)
+}
+
+class Interior {
+  +reset()
+  +enter(building)
+  +update(dt,game)
+  +draw(ctx)
+}
+
+class BulletBase {
+  +step()
+  +isSpent(camX,maxRange)
+}
+
+class PlayerBullet {
+  +step()
+  +trailHit(x,y,xtol,ytol)
+  +headHit(x,y,xtol,ytol)
+  +updateAll(bullets,camera)$
+  +drawAll(bullets,ctx,camera)$
+  +draw(ctx,camera)
+}
+
+class EnemyBullet {
+  +updateAll(bullets,camera)$
+  +drawAll(bullets,ctx,camera)$
+}
+
+PlayerBullet --|> BulletBase
+EnemyBullet --|> BulletBase
+
+Game "1" o-- "1" Camera
+Game "1" o-- "1" Input
+Game "1" o-- "1" Hud
+Game "1" o-- "1" HighScores
+Game "1" o-- "1" Renderer
+Game "1" o-- "1" WaveManager
+Game "1" o-- "1" CollisionSystem
+Game "1" o-- "0..1" RespawnSequence
+Game "1" o-- "1" Ship
+Game "1" o-- "1" Pilot
+Game "1" o-- "1" Interior
+Game "1" o-- "1..*" Building
+Game "1" o-- "0..*" Humanoid
+Game "1" o-- "0..*" Roamer
+Game "1" o-- "0..*" Bomber
+Game "1" o-- "0..*" Bomb
+Game "1" o-- "0..*" FallingCaptive
+Game "1" o-- "0..*" PlayerBullet
+Game "1" o-- "0..*" EnemyBullet
+Game "1" o-- "1" DebrisField
+Game "1" o-- "1" PickupField
+Game "1" o-- "1" ScorchField
+
+Renderer "1" o-- "1" Backdrop
+Renderer "1" o-- "1" Radar
+PickupField "1" o-- "0..*" Pickup

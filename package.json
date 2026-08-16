@@ -1,0 +1,15 @@
+{
+  "name": "ground-assault",
+  "version": "1.0.0",
+  "description": "The same game as `game-v2-ground-assault_X.html`, decomposed from one 2,162-line inline `<script>` into ES-module classes. No gameplay, tuning, or art changes — every number still comes from `src/config.js`, and every original design comment moved with the code it explains.",
+  "license": "ISC",
+  "author": "",
+  "type": "esm",
+  "main": "index.js",
+  "directories": {
+    "doc": "doc"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}
