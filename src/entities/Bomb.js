@@ -12,6 +12,7 @@ export class Bomb {
   constructor(x, y, targetY, targetBuilding){
     this.x = x;
     this.y = y;
+    this.startY = y; // where the fall began, so the whistle knows how far along it is
     this.targetY = targetY;
     this.targetBuilding = targetBuilding;
     this.exploded = false;
@@ -24,7 +25,22 @@ export class Bomb {
       if(bm._directHitPlayer(game)) continue;
       if(bm.y >= bm.targetY) bm.explode(game);
     }
-    return bombs.filter(bm => !bm.exploded);
+    const alive = bombs.filter(bm => !bm.exploded);
+    // Each falling bomb carries its own whistle, rising in pitch as it closes on its target — often
+    // the only warning that something is coming down on you from above the top of the screen. Wound
+    // up here rather than at the explosion sites because a bomb has several ways to leave play (it
+    // lands, it hits the player, a bullet knocks it out), and this is the one place that sees them
+    // all — no exit path can leave a whistle screaming over an empty sky.
+    for(const bm of bombs){
+      if(bm.exploded){ game.sound.stopLoop(bm); continue; }
+      const fall = bm.targetY - bm.startY;
+      game.sound.startLoop('bombWhistle', bm);
+      game.sound.setLoop(bm, {
+        progress: fall > 0 ? Math.max(0, Math.min(1, (bm.y - bm.startY)/fall)) : 1,
+        x: bm.x,
+      });
+    }
+    return alive;
   }
 
   // A bomb that runs bodily into the player detonates on contact — it doesn't get quietly deleted.
@@ -88,6 +104,9 @@ export class Bomb {
         game.scorches.add(this.x, this.targetY);
       }
     }
+    // a mid-air interception gets the ground-impact thud too — quieter and duller than a real hit,
+    // but it still detonated, so silence would read as the bomb simply vanishing
+    game.sound.play(atTarget && this.targetBuilding ? 'bombHitBuilding' : 'bombHitGround', { x: this.x });
     if(!skipPlayerBlast) this._blastPlayer(game, footWasOnThisRoof, impactY);
     this._blastCivilians(game, impactY);
   }

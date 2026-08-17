@@ -104,6 +104,7 @@ export class Roamer {
     if(Math.abs(ddx) < CONFIG.roamer.gunfireRange){
       const dir = ddx >= 0 ? 1 : -1;
       game.enemyBullets.push(new EnemyBullet(this.x, this.y, dir*CONFIG.roamer.gunfireSpeed, 0));
+      game.sound.play('roamerShot', { x: this.x });
       this.shootTimer = CONFIG.roamer.shootTimerMin + Math.random()*CONFIG.roamer.shootTimerRandRange;
     } else {
       this.shootTimer = CONFIG.roamer.outOfRangeRecheck; // out of range — check again soon
@@ -168,6 +169,7 @@ export class Roamer {
     const captured = this.target;
     captured.alive = false;
     game.loseHumanoid(captured, 'abducted');
+    game.sound.play('capture', { x: this.x });
     this.carrying = true; // drawn dangling beneath it while it climbs out (see draw)
     this.departing = true;
     // fly off up and to one side rather than straight up — chosen once per capture so it's a

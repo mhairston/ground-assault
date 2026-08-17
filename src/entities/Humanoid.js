@@ -120,6 +120,9 @@ export class Humanoid {
       if(hunter){
         this.fleeing = true;
         this.targetBuilding = game.nearestBuilding(this.x).b;
+        // rate-limited globally in the SoundManager (CONFIG.audio.civilianYelpGap): ten civilians
+        // panicking at once should read as one cry of alarm, not ten
+        game.sound.play('civilianDanger', { x: this.x });
       }
     }
     if(!this.fleeing){ this.moving = false; this.animPhase = 0; return; }
@@ -133,6 +136,7 @@ export class Humanoid {
     this.x = wrapX(this.x + Math.sign(dx)*Math.min(Math.abs(dx), FLEE_SPEED*dt));
     if(Math.abs(dx) < CONFIG.humanoid.doorReachDist){
       this.safe = true; this.fleeing = false; this.moving = false; this.animPhase = 0;
+      game.sound.play('civilianSafe', { x: this.x });
       for(const r of game.roamers) if(r.target === this) r.target = null;
     }
   }

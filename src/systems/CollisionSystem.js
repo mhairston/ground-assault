@@ -44,6 +44,7 @@ export class CollisionSystem {
         if(b.dead) continue;
         if(b.trailHit(bm.x, bm.y, 9, 18)){
           bm.exploded = true; b.dead = true; game.addScore(CONFIG.scoring.perBombShotDown);
+          game.sound.play('bombIntercept', { x: bm.x });
           game.spawnDebris(bm.x, bm.y, '#ffd24d', 8);
         }
       }

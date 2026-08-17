@@ -63,6 +63,7 @@ export class Building {
     const holeRadius = HOLE_RADIUS * (1 - CONFIG.building.holeRadiusVarianceFrac + Math.random()*CONFIG.building.holeRadiusVarianceFrac*2);
     this.holes.push({ dx: holeDx, y: holeY, radius: holeRadius });
     game.spawnDebris(hitX, hitY, '#9a8a78', CONFIG.building.debrisOnHit);
+    game.sound.play('buildingHit', { x: this.x });
     if(this.hp <= 0) this._collapse(game);
   }
 
@@ -70,6 +71,7 @@ export class Building {
     this.destroyed = true;
     game.addScore(CONFIG.scoring.perBuildingDestroyed); // -100 per building destroyed
     game.spawnDebris(this.x, GROUND_Y - this.height/2, '#6a5a48', CONFIG.building.debrisOnDestroy); // 4x the debris of a normal hit, per Mike's request
+    game.sound.play('buildingCollapse', { x: this.x });
     // any human still alive within 10px of the building (i.e. close enough that its footprint plus
     // a 10px margin reaches them) goes down with it, per Mike's request
     for(const h of game.humanoids){

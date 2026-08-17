@@ -21,6 +21,7 @@ import { WaveManager } from './systems/WaveManager.js';
 import { CollisionSystem } from './systems/CollisionSystem.js';
 import { RespawnSequence } from './systems/RespawnSequence.js';
 import { Renderer } from './render/Renderer.js';
+import { SoundManager } from './audio/SoundManager.js';
 
 // The world. Owns every entity list and the shared game state (mode, score, lives), and is passed to
 // entities as the one handle they need for anything outside themselves. Update logic that belongs to
@@ -44,11 +45,20 @@ export class Game {
     this.scorches = new ScorchField();
     this.collisions = new CollisionSystem(this);
     this.renderer = new Renderer(this.ctx, this);
+    this.sound = new SoundManager(this.camera);
 
     this.input = new Input(doc.getElementById('speedSelect'), {
       onBoardOrLand: () => this.tryBoardOrLand(),
       // P restarts the game once it's over — a no-op any other time so it can't be mashed mid-game
-      onRestart: () => { if(this.gameOver) this.reset(); },
+      onRestart: () => { if(this.gameOver){ this.sound.play('restart'); this.reset(); } },
+      // Browsers block audio until the page has been interacted with, so the very first keypress is
+      // what builds the AudioContext — and the drum track can only start once it exists.
+      onGesture: () => {
+        const fresh = this.sound.ctx === null;
+        this.sound.unlock();
+        if(fresh && !this.gameOver) this.sound.startMusic();
+      },
+      onMute: () => this.hud.setAudio(this.sound.toggleMute()),
     });
 
     this.reset();
@@ -89,6 +99,14 @@ export class Game {
     this.scorches.clear();
     this.bomberRespawn = CONFIG.bomber.initialRespawnTimer;
     this.superbombFlash = 0;
+    // every loop belongs to something that no longer exists after a restart — engine hum, enemy
+    // drones, the whistle of bombs that were in the air — so they all go rather than hanging on
+    if(this.sound){
+      this.sound.stopAllLoops();
+      this.sound.setMusicWave(1);
+      this.sound.startMusic(); // no-op if the context isn't unlocked yet, or if it's already running
+      this.hud.setAudio(this.sound.muted);
+    }
     this.respawn = null;
 
     this.waves.reset();
@@ -114,6 +132,7 @@ export class Game {
     if(h.counted) return;
     h.counted = true;
     this.addScore(CONFIG.scoring.perHumanLost);
+    this.sound.play('civilianLost', { x: h.x });
     if(kind === 'abducted') this.waves.recordCivAbduction();
     else this.waves.recordCivDeath();
   }
@@ -123,7 +142,8 @@ export class Game {
   killRoamer(r){
     r.alive = false;
     this.addScore(CONFIG.scoring.perEnemyKilled); // +25 per alien killed — a ramming kill counts the same as a shot-down one
-    this.spawnDebris(r.x, r.y, '#c98bff', CONFIG.debris.enemyKillCount); // doubled, per Mike's request for more debris when enemies are destroyed
+    this.spawnDebris(r.x, r.y, '#c98bff', CONFIG.debris.enemyKillCount, r.vx, r.vy); // doubled, per Mike's request for more debris when enemies are destroyed
+    this.sound.play('roamerDeath', { x: r.x });
     this.waves.recordEnemyDestroyed();
     if(r.carrying) this.spawnFallingCaptive(r.x, r.y);
   }
@@ -131,7 +151,8 @@ export class Game {
   killBomber(bo){
     bo.alive = false;
     this.addScore(CONFIG.scoring.perEnemyKilled);
-    this.spawnDebris(bo.x, bo.y, '#ff8a4d', CONFIG.debris.enemyKillCount);
+    this.spawnDebris(bo.x, bo.y, '#ff8a4d', CONFIG.debris.enemyKillCount, bo.vx, bo.vy);
+    this.sound.play('bomberDeath', { x: bo.x });
     this.waves.recordEnemyDestroyed();
   }
 
@@ -183,7 +204,7 @@ export class Game {
       const sx = relX(this.camera.x, bo.x);
       if(sx > -20 && sx < W+20){
         bo.alive = false;
-        this.spawnDebris(bo.x, bo.y, '#ff8a4d', CONFIG.debris.enemyKillCount);
+        this.spawnDebris(bo.x, bo.y, '#ff8a4d', CONFIG.debris.enemyKillCount, bo.vx, bo.vy);
         bomberCount++;
       }
     }
@@ -198,6 +219,9 @@ export class Game {
     this.waves.recordEnemyDestroyed(count);
     if(count>0) this.addScore(count*CONFIG.scoring.perEnemyKilled);
     this.superbombFlash = CONFIG.pickup.flashDuration;
+    // deliberately ONE boom for the whole sweep, not one per enemy caught: the superbomb is a single
+    // event, and a dozen overlapping death cracks on top of it would just be mud
+    this.sound.play('superbomb');
     this.pilot.superbombCount--;
   }
 
@@ -210,6 +234,7 @@ export class Game {
     if(!nearEnough) return;
     b.repair();
     this.spawnDebris(b.x, GROUND_Y - b.height/2, '#8fffb0', CONFIG.debris.fireSuppressantCount);
+    this.sound.play('suppressant', { x: b.x });
     this.pilot.fireSuppressantCount--;
   }
 
@@ -233,6 +258,8 @@ export class Game {
       const shipDist = Math.abs(wrapDelta(this.pilot.x, this.ship.x));
       if(!this.ship.airborne && shipDist < CONFIG.ship.boardDist && this.pilot.roofRef === this.ship.parkedOn){
         this.mode = 'flight';
+        this.sound.play('board');
+        this.sound.play('takeoff');
         this.ship.board(this.pilot.x);
       }
     } else if(this.mode === 'flight' && this.ship.alive && this.ship.auto === null){
@@ -245,7 +272,10 @@ export class Game {
       const surf = this.landingSurfaceAt(this.ship.x, this.ship.y);
       const landable = !surf.roofRef || surf.roofRef.hasLandingPad;
       const slowEnough = this.ship.speed <= CONFIG.ship.maxSpeed * CONFIG.ship.landSpeedFrac;
-      if(landable && surf.dist < CONFIG.ship.landDist && slowEnough) this.ship.beginLanding(surf);
+      if(landable && surf.dist < CONFIG.ship.landDist && slowEnough){
+        this.sound.play('landing');
+        this.ship.beginLanding(surf);
+      }
     }
   }
 
@@ -258,15 +288,19 @@ export class Game {
     if(this.lives<=0){
       this.gameOver = true;
       this.finalHighScores = this.highScores.save(this.score);
-      if(this.mode==='flight'){ this.spawnDebris(this.ship.x, this.ship.y, '#ffe08a', CONFIG.debris.shipFinalDeathCount); this.ship.alive = false; }
+      // the drums bleed away rather than stopping dead, and every loop goes with the run
+      this.sound.play('gameOver');
+      this.sound.stopMusic(CONFIG.audio.music.gameOverFade);
+      this.sound.stopAllLoops();
+      if(this.mode==='flight'){ this._destroyShip(CONFIG.debris.shipFinalDeathCount); }
       else if(this.mode==='foot'){ this.spawnDebris(this.pilot.x, this.pilot.midY, '#ff8b5e', CONFIG.debris.footFinalDeathCount); this.pilot.hidden = true; }
       return;
     }
+    this.sound.play('shipLost');
     // hide the destroyed ship/player and let the explosion play out — the next life doesn't actually
     // start (see finishRespawn) until the debris has finished and the "lives left" pause has elapsed
     if(this.mode==='flight'){
-      this.spawnDebris(this.ship.x, this.ship.y, '#ffe08a', CONFIG.debris.shipDeathCount);
-      this.ship.alive = false;
+      this._destroyShip(CONFIG.debris.shipDeathCount);
     } else if(this.mode==='foot'){
       this.spawnDebris(this.pilot.x, this.pilot.midY, '#ff8b5e', CONFIG.debris.footDeathCount);
       this.pilot.hidden = true;
@@ -274,10 +308,22 @@ export class Game {
     this.respawn = new RespawnSequence(this.mode);
   }
 
+  // shared by the final death and the ordinary one so they can't drift apart: blow the ship up with
+  // its own momentum behind the debris, then hand that exact cloud to the camera to follow while it
+  // burns out (see Camera.trackDebris) — there's nothing else left to watch until the next life.
+  _destroyShip(debrisCount){
+    const cloudLife = this.spawnDebris(this.ship.x, this.ship.y, '#ffe08a', debrisCount, this.ship.vx, this.ship.vy);
+    this.camera.followWreckage(this.ship.vx, cloudLife); // the wreck is the only thing left worth watching
+    this.ship.alive = false;
+  }
+
   finishRespawn(){
     if(this.respawn.mode === 'flight'){
       // wrapX(camera.x) is exactly the world x that relX maps to the screen's horizontal center, and
-      // H/2 centers it vertically too
+      // H/2 centers it vertically too. The camera has long since settled wherever the wreckage came
+      // to rest (the drift finishes ~1.4s in, well before the respawn's 2.9s), so the new ship
+      // arrives centred on the last thing the player was looking at.
+      this.camera.cancelDrift();
       this.ship.respawnAirborne(wrapX(this.camera.x), H/2);
       this.camera.follow(this.ship.x);
     } else if(this.respawn.mode === 'foot'){

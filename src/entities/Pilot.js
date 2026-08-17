@@ -48,6 +48,7 @@ export class Pilot {
 
   shoot(game){
     game.playerBullets.push(new PlayerBullet(this.x, this.y-4, 0, -CONFIG.pilot.bulletSpeed, true));
+    game.sound.play('footLaser');
   }
 
   update(dt, game){
@@ -74,8 +75,18 @@ export class Pilot {
   _updateClimbing(dt, game, speed){
     const input = game.input;
     this.vx = 0;
-    if(input.isDown('ArrowUp')) this.y -= speed*CONFIG.pilot.ladderClimbSpeedFactor*dt;
-    if(input.isDown('ArrowDown')) this.y += speed*CONFIG.pilot.ladderClimbSpeedFactor*dt;
+    const climbDir = (input.isDown('ArrowDown') ? 1 : 0) - (input.isDown('ArrowUp') ? 1 : 0);
+    this.y += climbDir * speed * CONFIG.pilot.ladderClimbSpeedFactor * dt;
+    // hand-over-hand cycle, advanced only while actually moving on the ladder. Unlike the walk cycle
+    // this is never reset to zero: a pilot pausing mid-climb simply stops advancing and so holds
+    // whatever grip they had, rather than snapping back to a fixed pose — which is what hanging on
+    // a ladder looks like.
+    if(climbDir !== 0){
+      this.animPhase += dt*CONFIG.pilot.climbAnimSpeed;
+      // rate-limited in the SoundManager rather than tied to the animation phase — the tick just
+      // needs to read as a steady metallic rhythm while climbing, not land exactly on a rung
+      game.sound.play('climbTick', { x: this.x });
+    }
     const b = this.ladderRef;
     const roofStand = b.standY(this.h), groundStand = GROUND_Y - this.h;
     // the ladder extends past the roofline (see Building._drawLadder), so climbing tops out with feet
@@ -92,6 +103,7 @@ export class Pilot {
     if(input.isDown('ArrowLeft')){ this.vx=-speed; this.facing=-1; }
     if(input.isDown('ArrowRight')){ this.vx=speed; this.facing=1; }
     this.animPhase = this.vx !== 0 ? this.animPhase + dt*CONFIG.pilot.animSpeed : 0;
+    if(this.vx !== 0) game.sound.play('footstep', { x: this.x });
     const proposed = wrapX(this.x + this.vx*dt);
     const margin = CONFIG.pilot.rooftopClampMargin;
     let d = wrapDelta(b.x, proposed);
@@ -115,6 +127,7 @@ export class Pilot {
     if(input.isDown('ArrowLeft')){ this.vx=-speed; this.facing=-1; }
     if(input.isDown('ArrowRight')){ this.vx=speed; this.facing=1; }
     this.animPhase = this.vx !== 0 ? this.animPhase + dt*CONFIG.pilot.animSpeed : 0;
+    if(this.vx !== 0) game.sound.play('footstep', { x: this.x });
     this.x = wrapX(this.x + this.vx*dt);
     this.y = GROUND_Y - this.h;
     game.camera.follow(this.x);
@@ -136,11 +149,16 @@ export class Pilot {
     if(this.hidden) return;
     const sx = relX(camera.x, this.x);
     if(this.invuln>0 && Math.floor(this.invuln*20)%2===0) ctx.globalAlpha=0.3;
+    if(this.climbing) this._drawClimbing(ctx, sx);
+    else this._drawOnFoot(ctx, sx);
+    ctx.globalAlpha = 1;
+  }
 
-    const moving = this.vx !== 0 && !this.climbing;
+  _drawOnFoot(ctx, sx){
     const bodyH = 12, legH = this.h - bodyH;
     // simple running cycle: legs scissor opposite each other, torso bobs slightly on every stride —
     // settles back to a neutral standing pose the instant the player stops
+    const moving = this.vx !== 0;
     const swing = moving ? Math.sin(this.animPhase) * 4.5 : 0;
     const bob = moving ? Math.abs(Math.sin(this.animPhase)) * 1.5 : 0;
 
@@ -149,6 +167,23 @@ export class Pilot {
     ctx.fillRect(sx-3+swing*0.6, this.y+bodyH-bob, 3, legH);
     ctx.fillRect(sx  -swing*0.6, this.y+bodyH-bob, 3, legH);
     ctx.fillStyle = '#ffd8c2'; ctx.fillRect(sx-3, this.y-4-bob, 6, 6);
-    ctx.globalAlpha = 1;
+  }
+
+  // Climbing gets its own pose rather than the running one, per Mike's request: seen face-on against
+  // the ladder, arms reaching for rungs and legs stepping opposite them, so a climb reads as a climb
+  // and not as someone running on the spot. The arms are the tell — they only exist in this pose.
+  // A pilot who stops mid-ladder freezes wherever the cycle left them, still gripping (see
+  // _updateClimbing), instead of settling to a neutral stance the way a stopped walk does.
+  _drawClimbing(ctx, sx){
+    const bodyH = 12, legH = this.h - bodyH;
+    const reach = Math.sin(this.animPhase); // frozen wherever it stopped when the player isn't climbing
+
+    ctx.fillStyle = '#ff8b5e';
+    ctx.fillRect(sx-4, this.y, 8, bodyH);                                    // torso: the ladder holds it steady, no bob
+    ctx.fillRect(sx-3, this.y+bodyH+reach*2, 3, legH-Math.abs(reach));       // legs step in opposition...
+    ctx.fillRect(sx,   this.y+bodyH-reach*2, 3, legH-Math.abs(reach));
+    ctx.fillRect(sx-6, this.y-2-reach*3, 2, 7);                              // ...to the arms hauling on the rungs
+    ctx.fillRect(sx+4, this.y-2+reach*3, 2, 7);
+    ctx.fillStyle = '#ffd8c2'; ctx.fillRect(sx-3, this.y-4, 6, 6);
   }
 }

@@ -66,6 +66,7 @@ export class Bomber {
       if(!b.destroyed && b.containsX(this.x)){ targetBuilding = b; targetY = b.roofY; break; }
     }
     game.bombs.push(new Bomb(this.x, this.y, targetY, targetBuilding));
+    game.sound.play('bombDrop', { x: this.x });
     this.bombTimer = CONFIG.bomber.reloadTimerBase + Math.random()*CONFIG.bomber.reloadTimerRandRange;
   }
 

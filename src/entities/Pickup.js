@@ -68,8 +68,13 @@ export class PickupField {
     if(game.mode==='foot' && pilot.roofRef){
       for(const p of this.items){
         if(p.building !== pilot.roofRef || Math.abs(wrapDelta(pilot.x, p.x)) >= CONFIG.pickup.collectDist) continue;
-        if(p.type==='superbomb' && pilot.superbombCount < MAX_CARRY){ pilot.superbombCount++; p.collected = true; }
-        else if(p.type==='firesuppressant' && pilot.fireSuppressantCount < MAX_CARRY){ pilot.fireSuppressantCount++; p.collected = true; }
+        if(p.type==='superbomb' && pilot.superbombCount < MAX_CARRY){
+          pilot.superbombCount++; p.collected = true;
+          game.sound.play('pickupSuperbomb', { x: p.x });
+        } else if(p.type==='firesuppressant' && pilot.fireSuppressantCount < MAX_CARRY){
+          pilot.fireSuppressantCount++; p.collected = true;
+          game.sound.play('pickupSuppressant', { x: p.x });
+        }
       }
       this.items = this.items.filter(p => !p.collected);
     }

@@ -69,6 +69,7 @@ export class Ship {
     // 30% faster than the original 18 — every ship shot is fired within a burst now, so this applies
     // to all of them, per Mike's request
     game.playerBullets.push(new PlayerBullet(this.x + this.facing*CONFIG.ship.bulletOffsetX, this.y, this.facing*CONFIG.ship.bulletSpeed, 0, false));
+    game.sound.play('laser');
   }
 
   update(dt, game){
@@ -105,6 +106,7 @@ export class Ship {
     game.mode = 'foot';
     game.pilot.landAt(this.x, surf);
     this.airborne = false; this.vx = 0; this.vy = 0; this.auto = null; this.parkedOn = surf.roofRef;
+    game.sound.play('disembark');
     game.camera.follow(game.pilot.x);
   }
 
@@ -180,7 +182,10 @@ export class Ship {
       this.shoot(game);
       this.shootCooldown = SHIP_BURST_INTERVAL;
       this.burstCount++;
-      if(this.burstCount >= SHIP_BURST_SIZE) this.coolingDown = SHIP_COOLDOWN_TIME;
+      if(this.burstCount >= SHIP_BURST_SIZE){
+        this.coolingDown = SHIP_COOLDOWN_TIME;
+        game.sound.play('burstCooldown');
+      }
     }
   }
 
@@ -198,5 +203,21 @@ export class Ship {
     const hw = this.w/2, notchX = -this.w*(6/26), topY = this.h/3, botY = -this.h/3;
     ctx.beginPath(); ctx.moveTo(-hw,topY); ctx.lineTo(hw,0); ctx.lineTo(-hw,botY); ctx.lineTo(notchX,0); ctx.closePath(); ctx.fill();
     ctx.restore();
+  }
+
+  // Exhaust plume out of the tail while the engine is firing, per Mike's request. Called from inside
+  // draw()'s translate/scale(facing) frame, so it needs no direction handling of its own — mirroring
+  // the hull mirrors the flame with it, and it always trails the right way. Two tapered tongues, an
+  // outer orange and an inner yellow core, both flickering on the same phase so the plume pulses as
+  // one. Geometry is fractions of w/h for the same reason the hull's is (see above): the ship's size
+  // is a CONFIG edit, and the flame should scale with it rather than needing its own numbers.
+  _drawFlame(ctx){
+    if(!this.thrusting) return;
+    const flicker = 0.7 + 0.3*Math.sin(this.flamePhase);
+    const rear = -this.w/2, len = this.w*0.4*flicker;
+    ctx.fillStyle = '#ff9a4d';
+    ctx.beginPath(); ctx.moveTo(rear, this.h/5); ctx.lineTo(rear-len, 0); ctx.lineTo(rear, -this.h/5); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#ffe08a';
+    ctx.beginPath(); ctx.moveTo(rear, this.h/10); ctx.lineTo(rear-len*0.55, 0); ctx.lineTo(rear, -this.h/10); ctx.closePath(); ctx.fill();
   }
 }

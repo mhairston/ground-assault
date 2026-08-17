@@ -254,6 +254,62 @@ export const CONFIG = {
     debrisStageDuration: 0.9,
     showLivesDuration: 2.0,
   },
+  camera: {
+    // after the ship is destroyed the camera rides its debris cloud rather than freezing where the
+    // ship was, per Mike's request — see Camera.update
+    // The drift needs no follow/ease gains: it reproduces the debris' own motion (see Camera.update)
+    // rather than steering toward it, so the only thing left to tune is how long the stop takes.
+    driftStopTime: 0.5,  // how long it takes to slow to a full stop once the last fragment burns out
+  },
+  // ---- audio (see plans/sound-effects-plan.md and src/audio/) ------------------------------------
+  // Everything is synthesised at runtime through the Web Audio API — no sample files, so the game
+  // stays self-contained and adds no load time. These are the mix and behaviour knobs; the actual
+  // voice recipes (which oscillator, which filter, what envelope) live in src/audio/voices.js, on
+  // the same "art direction stays with the drawing" principle the CONFIG header sets out for colors.
+  audio: {
+    masterVolume: 0.85,
+    // sub-buses, so the mix can be balanced by category rather than sound by sound. Ambient loops
+    // (engine hum, enemy drones) sit far lower than one-shots on purpose — in isolation they sound
+    // too quiet, and in the mix they are still the first thing to muddy everything else.
+    sfxVolume: 0.95, ambientVolume: 0.3, musicVolume: 0.35, uiVolume: 0.75,
+    startMuted: false,
+    // Panning is screen-relative rather than world-relative (the plan's open question): an object at
+    // the edge of the viewport is panned fully to that side, which is far more dramatic than scaling
+    // pan across the whole 4800px world, where everything audible would sit near centre.
+    panStrength: 0.85,   // 1 = hard left/right at the screen edges; less keeps some centre presence
+    audibleMargin: 320,  // px beyond the screen edge a sound can still be heard at all
+    edgeVolume: 0.15,    // how loud a sound is at that outer limit — it fades to this, never cuts off
+    maxVoicesPerSound: 4, // concurrency cap per sound id, so a burst of them can't stack into clipping
+    engine: {
+      baseHz: 42, speedHz: 5,  // hum pitch = baseHz + speedHz * (speed/maxSpeed)
+      volume: 0.15,              // relative to the ambient bus
+      thrustNoiseVolume: 0.2,  // the noise puff layered under the hum while thrust keys are held
+      glideVolume: 0.2,         // hum drops to this during an auto takeoff/landing glide
+    },
+    roamerDrone: { baseHz: 128, volume: 0.31, perRoamer: 0.05, lfoHz: 1.0, lfoPerRoamer: 0.18 },
+    bomberDrone: { baseHz: 64, volume: 0.23, perBomber: 0.05, wobbleHz: 1.8, wobbleCents: 22 },
+    bombWhistle: { fromHz: 1250, toHz: 400, volume: 0.1 },
+    // rate limits for sounds that would otherwise fire many times a second
+    footstepGap: 0.26, climbTickGap: 0.22, civilianYelpGap: 1.0,
+    music: {
+      enabled: true,
+      bpm: 120,
+      // tempo climbs with the waves, per the plan. Each entry is [fromWave, bpm], applied in order.
+      tempoSteps: [[5, 140], [8, 160]],
+      // 16 sixteenth-note steps, exactly the pattern drawn in the plan. Edit these strings to change
+      // the beat — 'X' is a hit, anything else is a rest, and all four voices share the same grid.
+      kick:     'X....X..X.X.....',
+      snare:    '...X....X....X..',
+      hatClosed:'XXX.X.XXXX.XX.XX',
+      hatOpen:  '.....X....X.....',
+      kickVolume: 0.9, snareVolume: 0.7, hatClosedVolume: 0.22, hatOpenVolume: 0.18,
+      // the standard Web Audio clock: schedule this far ahead, waking this often, so the beat stays
+      // tight even when the JS event loop is busy with a frame
+      lookahead: 0.1, tickInterval: 0.025,
+      fanfareDuckSeconds: 1.2, // drums cut for the wave-complete fanfare, then come back
+      gameOverFade: 1.5,
+    },
+  },
   highScores: { key: 'groundAssaultHighScores', maxEntries: 10 },
   player: { startingLives: 3 },
 };

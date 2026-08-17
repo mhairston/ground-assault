@@ -66,6 +66,7 @@ export class FallingCaptive {
       h.blinkTimer = CONFIG.captive.blinkDuration;
       game.humanoids.push(h);
       game.addScore(CONFIG.captive.scoreOnRescue);
+      game.sound.play('civilianRescued');
       this.rescued = true;
       return false;
     }

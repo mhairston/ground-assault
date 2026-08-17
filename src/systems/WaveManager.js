@@ -83,6 +83,10 @@ export class WaveManager {
     // flat per-wave bonus (Mike specified 500 for wave one; no growth formula was given, so every
     // wave awards the same flat bonus — flag this for confirmation)
     this.game.addScore(CONFIG.wave.completeBonus);
+    // the fanfare is the most musical sound in the game, so the drums step aside for it rather than
+    // playing underneath — and pick up exactly where they would have been, not from the top of a bar
+    this.game.sound.play('waveComplete');
+    this.game.sound.duckMusic(CONFIG.audio.music.fanfareDuckSeconds);
     // civilians who sheltered (or were fleeing) during the wave come back out and wander off away
     // from buildings during the lull, per Mike's request — clears safe/fleeing state and picks a
     // direction away from whatever building is nearest, for a few seconds of movement
@@ -97,6 +101,9 @@ export class WaveManager {
     this.completeTimer -= dt;
     if(this.completeTimer > 0) return;
     this.number++;
+    // the drum track speeds up as the waves get harder (CONFIG.audio.music.tempoSteps) — applied at
+    // the wave boundary, and only to steps not yet scheduled, so the beat shifts between bars
+    this.game.sound.setMusicWave(this.number);
     this.quota = WaveManager.quotaFor(this.number);
     this.spawned = 0; this.resolved = 0;
     this.civDeaths = 0; this.civAbductions = 0; this.enemiesDestroyed = 0;

@@ -6,10 +6,12 @@ export class Hud {
     this.livesEl = doc.getElementById('lives');
     this.modeEl = doc.getElementById('modeLabel');
     this.itemsEl = doc.getElementById('itemsLabel');
+    this.audioEl = doc.getElementById('audioLabel');
   }
 
   setScore(score){ this.scoreEl.textContent = 'SCORE ' + score; }
   setLives(lives){ this.livesEl.textContent = 'SHIPS ' + lives; }
   setMode(text){ this.modeEl.textContent = text; }
   setItems(parts){ this.itemsEl.textContent = parts.join('   '); }
+  setAudio(muted){ this.audioEl.textContent = muted ? 'SOUND OFF (M)' : 'SOUND ON (M)'; }
 }
