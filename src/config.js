@@ -199,10 +199,19 @@ export const CONFIG = {
     respawnTimerBase: 8, respawnTimerRandRange: 6,
     bombTimerMin: 1.5, bombTimerRandRange: 2,
     reloadTimerBase: 3, reloadTimerRandRange: 3,
-    despawnDist: 900,
+    // Spawn and despawn distances are measured from the EDGE of the visible area, not from the
+    // camera, because the viewport is no longer a fixed 960px (see world.maxCanvasW). As absolute
+    // distances — they were spawn 500-800, despawn 900 — a wide window put both inside the view:
+    // bombers appeared out of nowhere in plain sight and vanished at the screen edge, which is what
+    // Mike saw as "bombers are disappearing". Written as margins they hold at any width. Keep
+    // despawnMargin comfortably above spawnMarginMin+spawnMarginRandRange, or a bomber can spawn
+    // already past its own despawn threshold and blink out on its first frame.
+    despawnMargin: 420,
+    // spawnMarginMin has to clear the bomber's own draw margin (24px in Bomber.draw), or a bomber
+    // spawned at the minimum is already partly drawn at the screen edge — it pops into being in view
+    // rather than flying in from outside it
+    spawnMarginMin: 40, spawnMarginRandRange: 300,
     baseYMin: 110, baseYRandRange: 70,
-    spawnDistMin: 500, spawnDistRandRange: 300,
-    ramTolX: 16, ramTolY: 14,
     bulletTolX: 12, bulletTolY: 20,
   },
   bomb: {

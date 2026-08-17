@@ -16,8 +16,10 @@ export class Bomber {
   static spawn(game){
     const dir = Math.random()<0.5 ? -1 : 1;
     const baseY = CONFIG.bomber.baseYMin + Math.random()*CONFIG.bomber.baseYRandRange;
-    // spawn off-screen on the side opposite of travel, so it flies INTO view rather than away from it
-    const x = wrapX(game.camera.x - dir*(CONFIG.bomber.spawnDistMin+Math.random()*CONFIG.bomber.spawnDistRandRange));
+    // spawn off-screen on the side opposite of travel, so it flies INTO view rather than away from
+    // it — W/2 is the current distance from the camera to the screen edge, so the margin on top of
+    // it is genuinely off-screen whatever width the window is
+    const x = wrapX(game.camera.x - dir*(W/2 + CONFIG.bomber.spawnMarginMin + Math.random()*CONFIG.bomber.spawnMarginRandRange));
     const bo = new Bomber(x, baseY, dir);
     game.bombers.push(bo);
     return bo;
