@@ -88,12 +88,13 @@ export const CONFIG = {
     minFlightAltAboveGround: 45, // flight floor = groundY - this
     flightCeilingY: 50,
     autoGlideSpeed: 260,
-    bulletSpeed: 23.4,
+    flameAnimSpeed: 14, // how fast the exhaust plume flickers while thrusting — see Ship._drawFlame
+    bulletSpeed: 32,
     bulletOffsetX: 16,
-    burstSize: 6,
-    burstInterval: 0.1,
-    burstCooldown: 0.5,
-    ramRoamerTolX: 14, ramRoamerTolY: 12,
+    burstSize: 8,
+    burstInterval: 0.06,
+    burstCooldown: 0.4,
+    ramRoamerTolX: 18, ramRoamerTolY: 16, // 30% up with the roamer sprite (was 14/12)
     ramBomberTolX: 16, ramBomberTolY: 14,
     enemyBulletTolX: 11, enemyBulletTolY: 9,
     landDist: 20, // per Mike's request (round 19): board/land are key-triggered again (press A), not
@@ -122,13 +123,15 @@ export const CONFIG = {
     speed: 154,
     startOffsetFromShip: 100,
     ladderClimbSpeedFactor: 0.7,
-    ladderProximity: 8,
+    ladderProximity: 6,
     doorProximity: 10,
-    shootCooldown: 0.22,
-    bulletSpeed: 11,
+    shootCooldown: 0.4,
+    bulletSpeed: 12,
     rooftopClampMargin: 6,
     invulnAfterRespawn: 1.5,
-    animSpeed: 15,
+    animSpeed: 15,      // running cycle
+    climbAnimSpeed: 11, // hand-over-hand ladder cycle — slower than the run, in proportion to
+                        // ladderClimbSpeedFactor, so the pilot doesn't scrabble up faster than they move
   },
   humanoid: {
     height: 20,

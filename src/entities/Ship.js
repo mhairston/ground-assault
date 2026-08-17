@@ -32,6 +32,8 @@ export class Ship {
     this.shootCooldown = 0;
     this.burstCount = 0;
     this.coolingDown = 0;
+    this.thrusting = false;
+    this.flamePhase = 0;
   }
 
   get speed(){ return Math.hypot(this.vx, this.vy); }
@@ -95,6 +97,7 @@ export class Ship {
   }
 
   _glideTo(dt, game, onArrive){
+    this.thrusting = false; // _thrust doesn't run during a glide, so clear it or the flame sticks on
     const dy = this.autoTargetY - this.y;
     this.y += Math.sign(dy)*Math.min(Math.abs(dy), AUTO_VSPEED*dt);
     game.camera.follow(this.x);
@@ -235,6 +238,7 @@ export class Ship {
     if(sx<-30||sx>W+30) return;
     ctx.save(); ctx.translate(sx,sy); ctx.scale(this.facing,1);
     if(this.invuln>0 && Math.floor(this.invuln*20)%2===0) ctx.globalAlpha=0.3;
+    this._drawFlame(ctx); // behind the hull, so the tail end of it tucks under the notch
     ctx.fillStyle = '#8ff0ff';
     // hull silhouette expressed as fractions of w/h (rather than the old fixed pixel literals:
     // -13,4 / 13,0 / -13,-4 / -6,0, tuned for the original 26x12 ship) so the drawing scales
