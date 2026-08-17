@@ -116,7 +116,7 @@ export const CONFIG = {
                         // safely below the speed reached by a couple hundred ms of ordinary thrust, so a
                         // player who's still accelerating away can't accidentally satisfy it.
     boardDist: 16,
-    boardLiftHeight: 60, // on boarding, the ship visibly lifts this many px above wherever it boarded
+    boardLiftHeight: 24, // on boarding, the ship visibly lifts this many px above wherever it boarded
                          // (clamped to flightCeilingY) before handing control to the player — purely a
                          // "you're airborne now" visual cue, not load-bearing for any anti-re-land logic
                          // (board/land are explicit A-key presses now, with OS key-repeat filtered out —
@@ -179,7 +179,7 @@ export const CONFIG = {
     initialShootTimerMin: 1, initialShootTimerRandRange: 2.5,
     outOfRangeRecheck: 0.4,
     idleRecheck: 0.6,
-    tiltMaxDeg: 10, tiltScale: 0.00105, // bumped from 5 to 10, per Mike's request
+    tiltMaxDeg: 15, tiltScale: 0.00105, // bumped from 5 to 10, per Mike's request
     tiltEaseRate: 8, // how fast the drawn tilt eases toward its target each second, per Mike's
                       // request that the tilt transition be animated rather than an instant snap —
                       // see Roamer.easeTilts and Roamer.draw
@@ -247,7 +247,7 @@ export const CONFIG = {
     holeJitterX: 70, holeJitterY: 54, // widened (was 36/28), per Mike's request for more variation in
                                        // where bomb damage lands on a building's face
     maxGroundScorches: 150,
-    debrisOnExplode: 10,
+    debrisOnExplode: 50,
   },
   captive: {
     fallSpeed: 70,
@@ -265,7 +265,7 @@ export const CONFIG = {
     heightVert: 16,
     heightHoriz: 4,
     cullMargin: 200,
-    maxRange: 600, // player bullets fizzle out after traveling this far, per Mike's request — see
+    maxRange: 700, // player bullets fizzle out after traveling this far, per Mike's request — see
                     // PlayerBullet, which tracks accumulated distance per bullet.
     enemyMaxRange: 900, // roamer gunfire fizzles out after traveling this far, per Mike's request —
                         // same accumulated-distance approach as player bullets, just a separate, longer
