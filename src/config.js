@@ -143,25 +143,32 @@ export const CONFIG = {
     climbSpeed: 40,
     doorReachDist: 4,
     animSpeed: 15,
-    blinkDuration: 0.9,
-    roofSettleMin: 2, roofSettleRandRange: 2,
     wanderTimerMin: 3, wanderTimerRandRange: 3,
+    // NB: the blink-on-rescue duration and the rooftop settle timer live on `captive` — they only
+    // ever apply to a humanoid that has just been dropped or rescued, and that code reads them from
+    // there. Duplicates of them sat here unread for a while; don't re-add them.
   },
   roamer: {
-    huntSpeed: 60,
-    wanderSpeed: 50,
+    // 30% larger than the original 20x13 triangle, per Mike's request. Roamer.draw expresses its
+    // shape as fractions of these (the same treatment Ship.draw got), so resizing is a CONFIG edit
+    // rather than a redraw — and unlike the ship's earlier size bump, the hitboxes below WERE scaled
+    // to match, since the request was explicitly for the hit box to follow the sprite.
+    w: 26, h: 17,
+    huntSpeed: 80,
+    wanderSpeed: 70,
     escapeSpeed: 80,
     departClimbSpeed: 65,
     descendSpeed: 90,
     descendDriftAmp: 20,
     maxDiveSpeed: 60,
     diveGain: 3.5,
-    transitY: 200,
     nearHorizontally: 80,
     captureOffset: 8,
-    captureTolX: 5, captureTolY: 5,
+    captureTolX: 5, captureTolY: 8,
     wobbleAmp: 15, wobbleThreshold: 3,
-    separationDist: 18, separationY: 14, separationPush: 30,
+    // scaled with the sprite too: at the old 18/14 spacing, 30%-larger roamers visibly overlap each
+    // other, which is the same "they look wrong next to each other" problem separation exists to fix
+    separationDist: 23, separationY: 18, separationPush: 30,
     gunfireRange: 480, gunfireSpeed: 7,
     shootTimerMin: 1.6, shootTimerRandRange: 1.6,
     initialShootTimerMin: 1, initialShootTimerRandRange: 2.5,
@@ -303,8 +310,7 @@ export const CONFIG = {
     shipFinalDeathCount: 16,
     footDeathCount: 14,
     footFinalDeathCount: 16,
-    bombExplodeCount: 10,
-    fireSuppressantCount: 10,
+    fireSuppressantCount: 5,
   },
   respawn: {
     debrisStageDuration: 0.9,
