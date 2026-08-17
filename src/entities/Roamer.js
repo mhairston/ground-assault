@@ -241,13 +241,18 @@ export class Roamer {
   draw(ctx, camera){
     const sx = relX(camera.x, this.x);
     if(sx<-20||sx>W+20) return;
+    // hull silhouette as fractions of w/h rather than the fixed literals it was drawn with (0,-7 /
+    // 10,6 / -10,6, tuned for the original 20x13 triangle), so the 30%-larger roamer Mike asked for
+    // is a CONFIG edit and any future resize follows automatically — same treatment as Ship.draw.
+    const hw = this.w/2, apexY = -this.h*(7/13), baseY = this.h*(6/13);
     if(this.carrying){
-      // captive dangling beneath, visibly carried off as the roamer climbs out of view
+      // captive dangling beneath, visibly carried off as the roamer climbs out of view. Hung off the
+      // hull's base edge rather than a fixed offset, so it stays attached at any roamer size.
       ctx.fillStyle = '#ffd76b';
-      ctx.fillRect(sx-2, this.y+7, 4, 9);
-      ctx.beginPath(); ctx.arc(sx, this.y+5, 3, 0, Math.PI*2); ctx.fill();
+      ctx.fillRect(sx-2, this.y+baseY+1, 4, 9);
+      ctx.beginPath(); ctx.arc(sx, this.y+baseY-1, 3, 0, Math.PI*2); ctx.fill();
       ctx.strokeStyle = 'rgba(255,215,107,0.5)';
-      ctx.beginPath(); ctx.moveTo(sx, this.y+2); ctx.lineTo(sx, this.y-6); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(sx, this.y+baseY-4); ctx.lineTo(sx, this.y-6); ctx.stroke();
     }
     // tilts back slightly opposite its direction of travel — a small sense of momentum/lean rather
     // than gliding around perfectly upright, capped at tiltMaxDeg. drawTilt is computed and eased
@@ -256,7 +261,7 @@ export class Roamer {
     ctx.translate(sx, this.y);
     ctx.rotate(this.drawTilt || 0);
     ctx.fillStyle = '#c98bff';
-    ctx.beginPath(); ctx.moveTo(0,-7); ctx.lineTo(10,6); ctx.lineTo(-10,6); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(0,apexY); ctx.lineTo(hw,baseY); ctx.lineTo(-hw,baseY); ctx.closePath(); ctx.fill();
     ctx.restore();
   }
 }

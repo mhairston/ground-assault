@@ -183,7 +183,7 @@ export const CONFIG = {
     spawnDistMin: 250, spawnDistRandRange: 550,
     spawnYBase: -20, spawnYRandRange: 80,
     descendTargetYBase: 200, descendTargetYRandRange: 120,
-    bulletTolX: 10, bulletTolY: 20,
+    bulletTolX: 13, bulletTolY: 26, // 30% up with the sprite (was 10/20)
     // each roamer gets its own preferred cruise/transit altitude, assigned once at spawn, per Mike's
     // request that roamers "seek unique altitudes so they don't appear to be shooting each other" —
     // previously every hunting roamer converged on the same fixed transitY while closing horizontally
