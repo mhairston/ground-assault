@@ -120,16 +120,40 @@ export class Ship {
   // current max speed" part). Raising drag alone would do that regardless of acc; the acc trim is
   // there specifically so the ramp-up still feels a touch less punchy off the line, not just faster
   // at the top end. maxV keeps the same ~13% headroom-above-equilibrium ratio as before (1110/985).
+  // All of the above applies to the horizontal axis only. Up/Down is NOT a thrust, per Mike's
+  // request: holding a key means travelling at a flat CONFIG.ship.verticalSpeed, and releasing it
+  // means stopping — the config number IS the speed, with no acceleration curve or drag equilibrium
+  // in between. What it does have is a short ease on and off that speed (verticalEaseRate), because
+  // switching vy between 0 and full rate in a single frame is a visible snap at both ends. The ease
+  // is deliberately quick: it takes the edge off the start, stop and reversal without banking any
+  // real momentum, so pressing the opposite key still turns the ship around promptly rather than
+  // making the player wait out a glide. Holding both at once cancels to a hover.
   _thrust(dt, game){
     const input = game.input;
     const acc = CONFIG.ship.acceleration, drag = CONFIG.ship.drag, maxV = CONFIG.ship.maxSpeed;
+    // the thruster fires on horizontal thrust only — that's the axis with an engine behind it, since
+    // Up/Down is a flat rate rather than something the ship burns fuel to do (see below)
+    this.thrusting = input.isDown('ArrowLeft') || input.isDown('ArrowRight');
+    if(this.thrusting) this.flamePhase += dt*CONFIG.ship.flameAnimSpeed;
     if(input.isDown('ArrowLeft')){ this.vx -= acc*dt; this.facing=-1; }
     if(input.isDown('ArrowRight')){ this.vx += acc*dt; this.facing=1; }
-    if(input.isDown('ArrowUp')) this.vy -= acc*dt;
-    if(input.isDown('ArrowDown')) this.vy += acc*dt;
-    this.vx *= drag; this.vy *= drag;
+    this.vx *= drag;
     this.vx = Math.max(-maxV, Math.min(maxV, this.vx));
-    this.vy = Math.max(-maxV, Math.min(maxV, this.vy));
+
+    const down = input.isDown('ArrowDown') ? 1 : 0, up = input.isDown('ArrowUp') ? 1 : 0;
+    const targetVy = (down - up) * CONFIG.ship.verticalSpeed;
+    // Driving and coasting get their own rates, per Mike's request for more vertical momentum. While
+    // a key is held the ship answers it briskly (verticalEaseRate) — including a reversal, which
+    // targets full speed the other way and so is still driven, not coasted. Let go and it falls back
+    // to the much lazier verticalCoastRate, carrying on for a moment and bleeding off rather than
+    // pulling up short. exp(-rate*dt) rather than a flat per-frame fraction, so either takes the same
+    // amount of real time at any frame rate or sim-speed multiplier.
+    const rate = targetVy === 0 ? CONFIG.ship.verticalCoastRate : CONFIG.ship.verticalEaseRate;
+    this.vy += (targetVy - this.vy) * (1 - Math.exp(-rate*dt));
+    // an exponential approach never quite arrives; settle the last pixel-per-second outright so a
+    // released key really does mean stopped, rather than a permanent imperceptible creep
+    if(targetVy === 0 && Math.abs(this.vy) < 1) this.vy = 0;
+
     this.x = wrapX(this.x + this.vx*dt);
     this.y += this.vy*dt;
   }

@@ -56,9 +56,26 @@ export const CONFIG = {
                   // unchanged, same judgment call as an earlier round's bullet-width-only sizing change
                   // (see the design brief) — flagging in case the intent was to also grow the hitbox.
     startYOffset: -8,          // relative to ground level
-    acceleration: 800,
-    drag: 0.9921,
-    maxSpeed: 1890,
+    acceleration: 700,          // horizontal (Left/Right) thrust
+    // Vertical (Up/Down) is a flat rate, not a thrust, per Mike's request: hold the key and the ship
+    // moves at exactly this many px/s, release it and it stops. drag and maxSpeed do not apply —
+    // this IS the vertical speed, unlike `acceleration`, where the real cruise figure is the
+    // acc*dt*drag/(1-drag) equilibrium rather than the number written here.
+    verticalSpeed: 300,
+    // How sharply the ship eases onto that speed while a key is held, per second — the smoothing that
+    // keeps the start and the reversal from snapping, per Mike's request. It is NOT acceleration: the
+    // ship still tops out at exactly verticalSpeed, this only shapes the moment it gets there. Higher
+    // is crisper and more abrupt, lower is floatier and slower to answer the key. 10 reaches full
+    // rate in about a fifth of a second.
+    verticalEaseRate: 10,
+    // The same idea for letting go, but its own much lazier number, per Mike's request that the ship
+    // carry some vertical momentum: released, it keeps going and bleeds off rather than pulling up
+    // short. The glide is verticalSpeed/verticalCoastRate px — 75 at these values, about a fifth of
+    // the ship's altitude band — so lower this for a longer, floatier drift and raise it toward
+    // verticalEaseRate to go back to stopping almost as soon as the key comes up.
+    verticalCoastRate: 4,
+    drag: 0.9941,
+    maxSpeed: 600,
     minFlightAltAboveGround: 45, // flight floor = groundY - this
     flightCeilingY: 50,
     autoGlideSpeed: 260,
