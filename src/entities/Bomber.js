@@ -29,6 +29,7 @@ export class Bomber {
     this.y = baseY;
     this.dir = dir;
     this.phase = Math.random()*Math.PI*2;
+    this.vx = 0; this.vy = 0; // actual per-frame motion, so a kill can hand it to the debris (see Game.killBomber)
     this.alive = true;
     this.bombTimer = CONFIG.bomber.bombTimerMin + Math.random()*CONFIG.bomber.bombTimerRandRange;
   }
@@ -50,12 +51,19 @@ export class Bomber {
 
   update(dt, game){
     this.phase += dt;
+    const prevX = this.x, prevY = this.y;
     this.x = wrapX(this.x + this.dir*BOMBER_SPEED*dt);
     this.y = this.baseY + Math.sin(this.phase*BOMBER_ZIGZAG_FREQ)*BOMBER_ZIGZAG_AMP;
+    // measured from the actual move rather than re-deriving the zigzag's slope, so the vertical
+    // component stays right whatever the zigzag is tuned to (wrapDelta on x for the world seam)
+    this.vx = wrapDelta(prevX, this.x)/dt;
+    this.vy = (this.y - prevY)/dt;
     this.bombTimer -= dt;
     if(this.bombTimer <= 0) this._dropBomb(game);
-    // despawn once it's flown well off both sides of the visible world so the list doesn't grow forever
-    if(Math.abs(wrapDelta(game.camera.x, this.x)) > CONFIG.bomber.despawnDist) this.alive = false;
+    // despawn once it's flown well clear of the visible area so the list doesn't grow forever —
+    // measured past the screen edge (W/2), never at a fixed distance that a wide window would put
+    // on-screen
+    if(Math.abs(wrapDelta(game.camera.x, this.x)) > W/2 + CONFIG.bomber.despawnMargin) this.alive = false;
   }
 
   // drop straight down from wherever it happens to be right now — onto a building if it's flying

@@ -19,7 +19,9 @@ export class Roamer {
   constructor(x, y){
     this.x = x;
     this.y = y;
-    this.vx = 0;
+    this.w = CONFIG.roamer.w;
+    this.h = CONFIG.roamer.h;
+    this.vx = 0; this.vy = 0;
     this.alive = true;
     this.descending = true;
     this.descendTargetY = CONFIG.roamer.descendTargetYBase+Math.random()*CONFIG.roamer.descendTargetYRandRange;
@@ -53,9 +55,10 @@ export class Roamer {
   update(dt, game){
     this.phase += dt;
     // tracked so draw() can tilt the sprite back slightly opposite its actual direction of travel
-    // this frame — computed once at the bottom (or at each early return) from how far x moved,
-    // rather than duplicating per-branch velocity math
-    const prevX = this.x;
+    // this frame, and so a kill can hand the roamer's momentum to its debris (see Game.killRoamer) —
+    // computed once at the bottom (or at each early return) from how far it moved, rather than
+    // duplicating per-branch velocity math across every movement mode
+    const prevX = this.x, prevY = this.y;
 
     if(this.descending){
       this.y += CONFIG.roamer.descendSpeed*dt;
@@ -64,7 +67,7 @@ export class Roamer {
       // place." Per Mike's request that roamers never stay still, ever.
       this.x = wrapX(this.x + Math.sin(this.phase*1.2)*CONFIG.roamer.descendDriftAmp*dt);
       if(this.y >= this.descendTargetY){ this.y = this.descendTargetY; this.descending = false; }
-      this.vx = wrapDelta(prevX, this.x)/dt;
+      this._trackVelocity(prevX, prevY, dt);
       return; // just falling in — no combat/hunting until it's settled
     }
 
@@ -77,7 +80,7 @@ export class Roamer {
       this.y -= CONFIG.roamer.departClimbSpeed*dt; // half the original 130 climb speed while carrying a captive
       const escapeDir = this.escapeDir || 1;
       this.x = wrapX(this.x + escapeDir*CONFIG.roamer.escapeSpeed*dt + Math.sin(this.phase*1.5)*4*dt); // 2x horizontal speed, per Mike's request
-      this.vx = wrapDelta(prevX, this.x)/dt;
+      this._trackVelocity(prevX, prevY, dt);
       if(this.y < -40) this.alive = false;
       return;
     }
@@ -86,7 +89,14 @@ export class Roamer {
     this._acquireTarget(game);
     if(this.target) this._hunt(dt, game);
     else this._patrol(dt);
+    this._trackVelocity(prevX, prevY, dt);
+  }
+
+  // how far this roamer actually moved this frame, as a velocity — wrapDelta on x because the world
+  // is a cylinder and a roamer crossing the seam would otherwise register a world-width lurch
+  _trackVelocity(prevX, prevY, dt){
     this.vx = wrapDelta(prevX, this.x)/dt;
+    this.vy = (this.y - prevY)/dt;
   }
 
   // strafing gunfire: fire a straight left/right shot at whatever the player currently is. Stops

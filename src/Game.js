@@ -122,7 +122,11 @@ export class Game {
     this.hud.setScore(this.score);
   }
 
-  spawnDebris(x, y, color, count){ this.debris.spawn(x, y, color, count); }
+  // srcVx/srcVy: the velocity of whatever was destroyed, which its fragments fly away carrying a
+  // share of (see Fragment). Omitted by everything that blows up from a standstill — building hits,
+  // bomb impacts, ground explosions.
+  // returns when this explosion will be over (see DebrisField.spawn) — ignored by most callers
+  spawnDebris(x, y, color, count, srcVx = 0, srcVy = 0){ return this.debris.spawn(x, y, color, count, srcVx, srcVy); }
 
   spawnFallingCaptive(x, y){ this.fallingCaptives.push(new FallingCaptive(x, y)); }
 
@@ -194,7 +198,7 @@ export class Game {
       const sx = relX(this.camera.x, r.x);
       if(sx > -20 && sx < W+20){
         r.alive = false;
-        this.spawnDebris(r.x, r.y, '#c98bff', CONFIG.debris.enemyKillCount);
+        this.spawnDebris(r.x, r.y, '#c98bff', CONFIG.debris.enemyKillCount, r.vx, r.vy);
         if(r.carrying) this.spawnFallingCaptive(r.x, r.y);
         roamerCount++;
       }

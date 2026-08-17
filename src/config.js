@@ -251,16 +251,34 @@ export const CONFIG = {
   scoring: {
     perEnemyKilled: 25,
     perBombShotDown: 15,
-    perCaptiveRescued: 50,
     perHumanLost: -50,
     perBuildingDestroyed: -100,
-    perWaveCleared: 500,
+    // NB: not every score lives here. A rescue pays captive.scoreOnRescue and clearing a wave pays
+    // wave.completeBonus, both read from their own sections. Dead copies of the two sat here for a
+    // while looking authoritative; don't re-add them.
   },
   debris: {
+    // debris thrown off a destroyed ship/enemy flies away with the momentum that thing had, rather
+    // than bursting from a standstill, per Mike's request — a roamer shot down mid-strafe scatters
+    // along its flight path. momentumInherit is the share of the source's velocity each fragment
+    // starts with; momentumSpread is the ± per-fragment variation on that share, so the cloud shears
+    // apart instead of drifting as one rigid block. Only the sources that actually have a velocity
+    // pass one (ship, roamers, bombers) — building hits, bomb blasts and ground impacts still burst
+    // from rest, which is what they physically do.
+    momentumInherit: 0.7, momentumSpread: 0.25,
+    // air drag: the fraction of its velocity a fragment retains per second, applied to the burst and
+    // the inherited momentum alike, so debris slows gradually instead of coasting flat-out for its
+    // whole life. Applied as pow(drag, dt) so the decay is identical at any frame rate or sim speed.
+    // Also caps the fall: terminal velocity is gravity/-ln(drag), ≈183px/s at these values.
+    drag: 0.3,
+    gravity: 220, // downward pull on a fragment, px/s² (was a literal in DebrisField.update)
+    lifeMin: 0.5, lifeRandRange: 0.4, // how long a fragment burns for (was a literal in Fragment)
+    // per-explosion fragment counts. NB: only these ones are read from here — a building hit or
+    // collapse uses building.debrisOnHit/debrisOnDestroy and a bomb uses bomb.debrisOnExplode,
+    // each read from its own section. Dead copies of those three sat here and had already drifted
+    // out of step with the live values, so don't re-add them.
     enemyKillCount: 16,
-    buildingHitCount: 6,
-    buildingDestroyCount: 64,
-    shipDeathCount: 14,
+    shipDeathCount: 28,
     shipFinalDeathCount: 16,
     footDeathCount: 14,
     footFinalDeathCount: 16,
