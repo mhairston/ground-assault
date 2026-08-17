@@ -47,11 +47,16 @@ export const CONFIG = {
     // 'block', which kept its old flat 10 HP), clamped to a sensible min/max so a tiny house isn't a
     // one-shot kill and a huge tower isn't unkillable. See Building.hpFor().
     hpAreaReference: 8100, // 90*90 — the original block style's footprint
-    hpMin: 4, hpMax: 18,
-    holeRadius: 28,
+    hpMin: 4, hpMax: 10,
+    // Base hole size, trimmed from 28 per Mike's request that the biggest blast holes be smaller.
+    // With the ±35% variance below that moves the range from 18-38px to 14-30px, so the largest hole
+    // is ~20% smaller. Done by lowering the base rather than by clamping the top of the range: a
+    // clamp would pile every oversized roll onto the cap, and a row of identically maxed-out holes is
+    // exactly the uniformity the variance was added to break up.
+    holeRadius: 22,
     holeRadiusVarianceFrac: 0.35, // per-hit hole size varies ±35%, per Mike's request for more
                                   // visual variation in bomb damage — see Building.damage
-    debrisOnHit: 6,
+    debrisOnHit: 36,
     debrisOnDestroy: 64,
     humanDeathRadiusPastEdge: 10,     // how far past a destroyed building's footprint a human still dies
     ramDamagesBuildingsDefault: false, // see RAM_DAMAGES_BUILDINGS
