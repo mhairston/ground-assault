@@ -360,10 +360,41 @@ export class Game {
     if(this.superbombFlash > 0) this.superbombFlash -= dt;
     this.fallingCaptives = FallingCaptive.updateAll(this.fallingCaptives, dt, this);
     this.debris.update(dt);
+    this.camera.update(dt); // after the debris moves, so a drifting camera reads this frame's positions
+    this._updateAudioLoops();
+
     this.playerBullets = PlayerBullet.updateAll(this.playerBullets, this.camera);
     this.enemyBullets = EnemyBullet.updateAll(this.enemyBullets, this.camera);
     this.collisions.run();
     this.updateHud();
+  }
+
+  // The continuous sounds, re-evaluated every frame from game state rather than started and stopped
+  // at event sites. Each of these is a thing that is either happening or not right now — the ship is
+  // flying or it isn't, there are roamers on screen or there aren't — and driving them off the state
+  // directly means they can never be left running by a path that forgot to stop them (a death, a
+  // superbomb clearing the screen, a restart).
+  _updateAudioLoops(){
+    const flying = this.mode === 'flight' && this.ship.alive && !this.respawn;
+    this.sound.loopWhile('engine', flying, {
+      speedFrac: Math.min(1, Math.abs(this.ship.vx)/CONFIG.ship.maxSpeed),
+      thrusting: this.ship.thrusting,
+      gliding: this.ship.auto !== null,
+    });
+    // enemy drones follow how many are actually ON SCREEN, not how many exist — the drone is about
+    // the pressure in front of you, and something two screens away shouldn't be adding to it
+    this.sound.loopWhile('roamerDrone', true, { count: this._onScreenCount(this.roamers) });
+    this.sound.loopWhile('bomberDrone', true, { count: this._onScreenCount(this.bombers) });
+  }
+
+  _onScreenCount(list){
+    let n = 0;
+    for(const e of list){
+      if(!e.alive) continue;
+      const sx = relX(this.camera.x, e.x);
+      if(sx > -40 && sx < W+40) n++;
+    }
+    return n;
   }
 
   updateHud(){
