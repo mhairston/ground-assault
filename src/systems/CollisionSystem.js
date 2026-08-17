@@ -18,7 +18,33 @@ export class CollisionSystem {
 
     if(game.mode==='flight' && game.ship.alive && game.ship.invuln<=0) this._shipVsWorld(game);
     if(game.mode==='foot' && !game.pilot.hidden && game.pilot.invuln<=0) this._pilotVsBullets(game);
+    this._enemyBulletsVsBuildings(game);
     game.enemyBullets = game.enemyBullets.filter(eb=>!eb.dead);
+  }
+
+  // Roamer gunfire wrecks the city it's shot over, per Mike's request — the same damage model bombs
+  // use, so a stray round punches a hole and enough of them bring a building down. Note this is the
+  // one thing on the board that damages buildings without the player being involved at all: roamers
+  // strafe horizontally at whatever height they're hunting from, so a firefight along a street will
+  // chew through the frontage whether or not the player is anywhere near it.
+  //
+  // Deliberately asymmetric with player fire, which passes through buildings harmlessly (see run()).
+  // That asymmetry is the point: the player can't casually demolish their own city by missing, but
+  // the enemy can, and a building lost still costs the player score (Building._collapse).
+  _enemyBulletsVsBuildings(game){
+    for(const eb of game.enemyBullets){
+      if(eb.dead) continue;
+      for(const bld of game.buildings){
+        if(bld.destroyed) continue;
+        // the building's silhouette is its footprint from roof to ground; a bullet inside that box
+        // has hit the face of it
+        if(Math.abs(wrapDelta(eb.x, bld.x)) >= bld.width/2) continue;
+        if(eb.y < bld.roofY || eb.y > GROUND_Y) continue;
+        eb.dead = true;
+        bld.damage(eb.x, eb.y, game);
+        break; // spent on the first thing it hits
+      }
+    }
   }
 
   _bulletsVsRoamers(game){
