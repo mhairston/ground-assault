@@ -81,8 +81,9 @@ export class Ship {
     if(this.auto === 'takeoff'){ this._glideTo(dt, game, () => { this.y = this.autoTargetY; this.auto = null; }); return; }
     if(this.auto === 'landing'){ this._glideTo(dt, game, () => this._touchDown(game)); return; }
 
+    const prevY = this.y; // where the ship was before this frame's move — see _clampAltitude
     this._thrust(dt, game);
-    this._clampAltitude(game);
+    this._clampAltitude(game, prevY);
     game.camera.follow(this.x);
     this._fire(dt, game);
 
@@ -175,20 +176,35 @@ export class Ship {
   // hard-stops the ship right at the pad the instant it's landable there. Flying over a pad-less
   // rooftop is unaffected — it still stops at the normal MIN_FLIGHT_ALT_Y floor as before, out of
   // landing-distance range entirely.
-  _clampAltitude(game){
+  //
+  // A rooftop is only a floor FROM ABOVE, though. landingSurfaceAt returns whichever surface is
+  // vertically nearest, which for a tall landing-pad tower includes the whole band of airspace below
+  // its roof but nearer to it than to the street. Treating the roof as a floor there yanked the ship
+  // upward to roof height the moment it flew into that band — a teleport that read as the game
+  // landing for you, and Mike reported it as exactly that. Buildings aren't solid to the ship
+  // (RAM_DAMAGES_BUILDINGS is off), so flying below a roof is legitimate: down there the ordinary
+  // ground floor applies and the roof is simply ignored.
+  //
+  // "From above" has to be judged on prevY — where the ship was BEFORE this frame's move — not on
+  // where it ended up. Testing the post-move position means a ship descending onto the pad is already
+  // a few px below it by the time we look, reads as "not from above", and sails straight through the
+  // surface it was meant to land on. prevY also makes the catch exact at any speed: however far the
+  // ship travelled this frame, if it started at or above the surface it stops there.
+  _clampAltitude(game, prevY){
     const landSurf = game.landingSurfaceAt(this.x, this.y);
     const landable = !landSurf.roofRef || landSurf.roofRef.hasLandingPad;
-    const floorY = landable ? (landSurf.topY - 8) : MIN_FLIGHT_ALT_Y;
+    const restY = landSurf.topY - 8;
+    const fromAbove = !landSurf.roofRef || prevY <= restY; // open ground is always "below" the ship
+    const floorY = landable && fromAbove ? restY : MIN_FLIGHT_ALT_Y;
     const clampedY = Math.max(CONFIG.ship.flightCeilingY, Math.min(floorY, this.y));
-    // Only the vertical velocity dies against a vertical bound, and only that. Zeroing vy is what
-    // makes the bounds feel solid AND keeps them responsive: without it, holding Up at the ceiling
-    // banks up nearly 1700px/s of upward momentum that has to be burned off before the ship budges
-    // downward, so the reversal lags by seconds — with it, vy restarts from 0 and Down bites on the
-    // very next frame (same story for Up at the floor). vx is deliberately left alone: it isn't the
-    // component that hit anything, and zeroing it both froze horizontal control while a vertical key
-    // was held against a bound and short-circuited the landing speed gate (Game.tryBoardOrLand reads
-    // this.speed, which with vx and vy both forced to 0 always passed, letting the ship set down at
-    // full throttle).
+    // Only the vertical velocity dies against a vertical bound, and only that. Reversal off a bound
+    // is instant on its own now that Up/Down is a flat rate (see _thrust) — what zeroing vy still
+    // buys is the landing speed gate: Game.tryBoardOrLand reads this.speed, and a ship resting on a
+    // landable surface with Down held would otherwise report the full verticalSpeed and never be
+    // allowed to set down. vx is deliberately left alone: it isn't the component that hit anything,
+    // and zeroing it both froze horizontal control while a vertical key was held against a bound and
+    // short-circuited that same gate from the other side — with vx and vy both forced to 0 the check
+    // always passed, letting the ship land at full throttle.
     if(clampedY !== this.y) this.vy = 0;
     this.y = clampedY;
   }
