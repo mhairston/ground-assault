@@ -7,7 +7,16 @@
 // single one out here would bloat this object without giving anyone a real reason to touch it. ====
 export const CONFIG = {
   world: {
-    canvasW: 960, canvasH: 540,   // also drives the actual <canvas> element size, see main.js
+    // canvasW is the width actually in use, not a fixed setting: the view fills the browser window
+    // up to maxCanvasW, per Mike's request, so this starts as a sensible default and is overwritten
+    // by setViewportWidth() on load and on every resize. A wider window simply shows more of the
+    // world at once — the world itself (`width` below) doesn't change, and neither does the radar's
+    // scale; the radar's viewport box just grows to match how much is visible. See main.js.
+    canvasW: 960, canvasH: 540,
+    maxCanvasW: 1800,              // never grow past this however wide the window gets
+    minCanvasW: 480,               // ...or shrink below it, past which the HUD stops being readable
+    canvasMarginX: 32,             // window space the canvas can't have: #wrap's 14px padding plus
+                                   // the canvas's own 2px border, both sides (see index.html CSS)
     width: 4800,                   // how far the world wraps around (was WORLD_W)
     groundY: 460,                   // y-coordinate of ground level (was GROUND_Y)
   },
@@ -351,7 +360,23 @@ export const CONFIG = {
 
 // ---- derived world constants: read straight off CONFIG.world so there's exactly one source of truth
 // for the world's dimensions, and every module can import them without re-deriving anything. ----
-export const W = CONFIG.world.canvasW;
+
+// The viewport width — how much of the world is on screen at once. `let`, not `const`, because it
+// follows the browser window now (per Mike's request): main.js calls setViewportWidth on load and on
+// every resize. Modules import it as an ES live binding, so they all see the new value with no
+// plumbing, PROVIDED they read W where they use it. Caching it into a module-level derived constant
+// (`const half = W/2`) would freeze it at load and silently stop tracking — the one thing to avoid.
+export let W = CONFIG.world.canvasW;
+
+// Clamps `px` into the allowed range, then publishes it as both CONFIG.world.canvasW and W.
+// Returns the width actually used, which is what the canvas element should be sized to.
+export function setViewportWidth(px){
+  const w = Math.round(Math.max(CONFIG.world.minCanvasW, Math.min(CONFIG.world.maxCanvasW, px)));
+  CONFIG.world.canvasW = w;
+  W = w;
+  return w;
+}
+
 export const H = CONFIG.world.canvasH;
 export const GROUND_Y = CONFIG.world.groundY;
 export const WORLD_W = CONFIG.world.width;
