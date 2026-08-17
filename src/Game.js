@@ -69,17 +69,22 @@ export class Game {
   // restart) so the two can't drift out of sync; nothing here tears down the canvas, listeners, or
   // localStorage high scores.
   reset(){
-    // the pilot starts out 100px to the left of the parked ship rather than right beside it, per
-    // Mike's request — wrapX handles the world-seam wraparound cleanly if the offset goes negative
     this.buildings = CONFIG.buildings.map(b => new Building(b));
     this.humanoids = [];
     for(let i=0;i<CONFIG.humanoid.count;i++) this.humanoids.push(new Humanoid(wrapX(Math.random()*WORLD_W)));
 
-    this.mode = 'foot'; // 'foot' | 'interior' | 'flight'
+    // The game opens in the air, flying, rather than on foot beside the parked ship, per Mike's
+    // request. Deliberately the same placement an airborne respawn uses (see finishRespawn) so
+    // there's one notion of "dropped into flight at mid-altitude": over the pad, at H/2, with the
+    // usual spawn invulnerability. ship.reset() still runs first so the parked/gear state underneath
+    // is clean, and the pilot is still reset (100px left of the pad, per Mike's earlier request) —
+    // that position simply isn't used until the player lands somewhere, which re-places them.
+    this.mode = 'flight'; // 'foot' | 'interior' | 'flight'
     this.pilot.reset(wrapX(this.shipPad.x - CONFIG.pilot.startOffsetFromShip));
     this.ship.reset();
+    this.ship.respawnAirborne(this.shipPad.x, H/2);
     this.interior.reset();
-    this.camera.reset(this.pilot.x);
+    this.camera.reset(this.ship.x);
 
     this.score = 0;
     this.lives = CONFIG.player.startingLives;
