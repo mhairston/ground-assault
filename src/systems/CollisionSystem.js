@@ -12,6 +12,8 @@ export class CollisionSystem {
     this._bulletsVsRoamers(game);
     this._bulletsVsBombs(game);
     this._bulletsVsBombers(game);
+    this._bulletsVsKamikazes(game);
+    this._kamikazesVsEnemies(game);
     // player gunfire no longer damages buildings — it just passes through them harmlessly. The only
     // way to damage a building yourself is by ramming it with the ship (see _shipVsWorld).
     game.playerBullets = game.playerBullets.filter(b=>!b.dead);
@@ -71,6 +73,9 @@ export class CollisionSystem {
         if(b.trailHit(bm.x, bm.y, 9, 18)){
           bm.exploded = true; b.dead = true; game.addScore(CONFIG.scoring.perBombShotDown);
           game.sound.play('bombIntercept', { x: bm.x });
+          // this bomb is filtered out of game.bombs below, before Bomb.updateAll ever runs again to
+          // see it as exploded — so its whistle loop has to be released here, or it plays forever
+          game.sound.stopLoop(bm);
           game.spawnDebris(bm.x, bm.y, '#ffd24d', 8);
         }
       }
@@ -86,17 +91,80 @@ export class CollisionSystem {
         // head-only hit test, per Mike's request — see PlayerBullet.headHit
         if(b.headHit(bo.x, bo.y, CONFIG.bomber.bulletTolX, CONFIG.bomber.bulletTolY)){
           b.dead = true;
-          game.killBomber(bo);
+          bo.hit(game);
         }
       }
     }
     game.bombers = game.bombers.filter(bo=>bo.alive);
   }
 
+  _bulletsVsKamikazes(game){
+    for(const k of game.kamikazes){
+      if(!k.alive) continue;
+      for(const b of game.playerBullets){
+        if(b.dead) continue;
+        if(b.headHit(k.x, k.y, CONFIG.kamikaze.bulletTolX, CONFIG.kamikaze.bulletTolY)){
+          b.dead = true;
+          game.killKamikaze(k);
+        }
+      }
+    }
+    game.kamikazes = game.kamikazes.filter(k=>k.alive);
+  }
+
+  // If two kamikazes touch each other — not the ship — they take each other out entirely, per
+  // Mike's request: a much bigger blast than either dies with alone (see Game.explodeKamikazePair).
+  // Checked as a bounding-box overlap using their own w/h, same "hit box matches image size"
+  // treatment the ship itself got.
+  // A kamikaze that touches ANY other enemy — a roamer, a bomber, or another kamikaze — detonates,
+  // taking both out in one big blast (see Game.explodeKamikazeWith), per Mike's request: originally
+  // just kamikaze-vs-kamikaze, now extended to every enemy type. Checked as a bounding-box overlap
+  // using each pair's own w/h, same "hit box matches image size" treatment the ship itself got.
+  // Each kamikaze only takes ONE other enemy with it per frame (roamer checked first, then bomber,
+  // then another kamikaze) — the `continue` after a hit is what enforces that, so a kamikaze that
+  // lands in the middle of a crowd doesn't chain-explode through all of it in a single tick.
+  _kamikazesVsEnemies(game){
+    for(const k of game.kamikazes){
+      if(!k.alive) continue;
+      let exploded = false;
+      for(const r of game.roamers){
+        if(!r.alive) continue;
+        if(Math.abs(wrapDelta(k.x,r.x)) < (k.w+r.w)/2 && Math.abs(k.y-r.y) < (k.h+r.h)/2){
+          game.explodeKamikazeWith(k, r, CONFIG.scoring.perRoamerKilled);
+          exploded = true;
+          break;
+        }
+      }
+      if(exploded) continue;
+      for(const bo of game.bombers){
+        if(!bo.alive) continue;
+        if(Math.abs(wrapDelta(k.x,bo.x)) < (k.w+bo.w)/2 && Math.abs(k.y-bo.y) < (k.h+bo.h)/2){
+          game.explodeKamikazeWith(k, bo, CONFIG.scoring.perBomberKilled);
+          exploded = true;
+          break;
+        }
+      }
+      if(exploded) continue;
+      for(const other of game.kamikazes){
+        if(other === k || !other.alive) continue;
+        if(Math.abs(wrapDelta(k.x,other.x)) < (k.w+other.w)/2 && Math.abs(k.y-other.y) < (k.h+other.h)/2){
+          game.explodeKamikazeWith(k, other, CONFIG.scoring.perKamikazeKilled);
+          break;
+        }
+      }
+    }
+    game.roamers = game.roamers.filter(r=>r.alive);
+    game.bombers = game.bombers.filter(bo=>bo.alive);
+    game.kamikazes = game.kamikazes.filter(k=>k.alive);
+  }
+
   _shipVsWorld(game){
     const ship = game.ship;
+    // the ship's hit box is its actual image size, per Mike's request — half-width/half-height read
+    // straight off ship.w/h rather than separately tuned (and previously smaller) tolerances
+    const shipHalfW = ship.w/2, shipHalfH = ship.h/2;
     for(const r of game.roamers){
-      if(r.alive && Math.abs(wrapDelta(ship.x,r.x)) < CONFIG.ship.ramRoamerTolX && Math.abs(ship.y-r.y) < CONFIG.ship.ramRoamerTolY){
+      if(r.alive && Math.abs(wrapDelta(ship.x,r.x)) < shipHalfW && Math.abs(ship.y-r.y) < shipHalfH){
         // crashing into a roamer destroys both — the ship (loseLife, same as any other hit) and the
         // roamer itself, same debris/falling-captive handling as a clean bullet kill
         game.killRoamer(r);
@@ -105,14 +173,23 @@ export class CollisionSystem {
       }
     }
     for(const bo of game.bombers){
-      if(bo.alive && Math.abs(wrapDelta(ship.x,bo.x)) < CONFIG.ship.ramBomberTolX && Math.abs(ship.y-bo.y) < CONFIG.ship.ramBomberTolY){
+      if(bo.alive && Math.abs(wrapDelta(ship.x,bo.x)) < shipHalfW && Math.abs(ship.y-bo.y) < shipHalfH){
         game.killBomber(bo);
         game.loseLife();
         break;
       }
     }
+    for(const k of game.kamikazes){
+      if(k.alive && Math.abs(wrapDelta(ship.x,k.x)) < shipHalfW && Math.abs(ship.y-k.y) < shipHalfH){
+        // this is the whole point of a kamikaze — it rams on contact same as a roamer/bomber would,
+        // just far more eagerly since it's been actively steering toward exactly this
+        game.killKamikaze(k);
+        game.loseLife();
+        break;
+      }
+    }
     for(const eb of game.enemyBullets){
-      if(!eb.dead && Math.abs(wrapDelta(eb.x,ship.x)) < CONFIG.ship.enemyBulletTolX && Math.abs(eb.y-ship.y) < CONFIG.ship.enemyBulletTolY){
+      if(!eb.dead && Math.abs(wrapDelta(eb.x,ship.x)) < shipHalfW && Math.abs(eb.y-ship.y) < shipHalfH){
         eb.dead = true; game.loseLife();
       }
     }

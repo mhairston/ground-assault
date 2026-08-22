@@ -2,8 +2,8 @@ import { CONFIG, GROUND_Y, W, MIN_FLIGHT_ALT_Y } from '../config.js';
 import { relX, wrapDelta } from '../core/geometry.js';
 import { Humanoid } from './Humanoid.js';
 
-// falls at a flat rate rather than accelerating, per Mike's request
-const CAPTIVE_FALL_SPEED = CONFIG.captive.fallSpeed;
+// falls from rest and accelerates under gravity, per Mike's request (previously a flat rate)
+const CAPTIVE_FALL_GRAVITY = CONFIG.captive.fallGravity;
 // a fall of 2 building "stories" or less is survivable — the captive gets up and rejoins as a normal
 // (free) humanoid right where they landed instead of dying. ~25px/story, so ~50px total.
 const STORY_HEIGHT = CONFIG.captive.surviveStoryHeight;
@@ -18,6 +18,7 @@ export class FallingCaptive {
     this.x = x;
     this.y = y;
     this.startY = y;
+    this.vy = 0; // falls from rest, gathering speed under gravity — see update()
     this.followShip = false;
     this.rescued = false;
     this.survived = false;
@@ -37,7 +38,8 @@ export class FallingCaptive {
   update(dt, game, carrying){
     if(this.followShip) return this._ride(game, carrying);
 
-    this.y += CAPTIVE_FALL_SPEED*dt;
+    this.y += this.vy*dt;
+    this.vy += CAPTIVE_FALL_GRAVITY*dt;
     const ship = game.ship;
     if(!carrying && game.mode==='flight' && ship.alive && Math.abs(wrapDelta(ship.x,this.x)) < CONFIG.captive.catchTolX && Math.abs(ship.y-this.y) < CONFIG.captive.catchTolY){
       this.followShip = true; carrying = true;
@@ -67,6 +69,7 @@ export class FallingCaptive {
       game.humanoids.push(h);
       game.addScore(CONFIG.captive.scoreOnRescue);
       game.sound.play('civilianRescued');
+      game.waves.recordCivRescue();
       this.rescued = true;
       return false;
     }

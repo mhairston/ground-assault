@@ -7,11 +7,6 @@
 // single one out here would bloat this object without giving anyone a real reason to touch it. ====
 export const CONFIG = {
   world: {
-    // canvasW is the width actually in use, not a fixed setting: the view fills the browser window
-    // up to maxCanvasW, per Mike's request, so this starts as a sensible default and is overwritten
-    // by setViewportWidth() on load and on every resize. A wider window simply shows more of the
-    // world at once — the world itself (`width` below) doesn't change, and neither does the radar's
-    // scale; the radar's viewport box just grows to match how much is visible. See main.js.
     canvasW: 960, canvasH: 540,
     maxCanvasW: 1800,              // never grow past this however wide the window gets
     minCanvasW: 480,               // ...or shrink below it, past which the HUD stops being readable
@@ -20,11 +15,6 @@ export const CONFIG = {
     width: 4800,                   // how far the world wraps around (was WORLD_W)
     groundY: 460,                   // y-coordinate of ground level (was GROUND_Y)
   },
-  // edit/add/remove entries here to change how many buildings exist, and where — "number of
-  // buildings" has no separate count field because the list itself IS the configuration.
-  // hasLandingPad marks a building's roof as one the ship can actually land on, per Mike's request —
-  // only one of the 8 ladder-having (non-house) buildings has one by default; every other rooftop,
-  // ladder or not, is walkable/climbable as always but the ship itself can't set down there.
   buildings: [
     { x: 260,  width: 90,  height: 90,  style: 'block' },
     { x: 550,  width: 80,  height: 70,  style: 'house' },
@@ -58,7 +48,7 @@ export const CONFIG = {
                                   // visual variation in bomb damage — see Building.damage
     debrisOnHit: 36,
     debrisOnDestroy: 64,
-    humanDeathRadiusPastEdge: 10,     // how far past a destroyed building's footprint a human still dies
+    humanDeathRadiusPastEdge: 30,     // how far past a destroyed building's footprint a human still dies
     ramDamagesBuildingsDefault: false, // see RAM_DAMAGES_BUILDINGS
     ramTolXPastEdge: 12, ramTolYAboveRoof: 6, ramTolYBelowGround: 4,
   },
@@ -66,9 +56,10 @@ export const CONFIG = {
   ship: {
     w: 52, h: 24, // doubled (was 26/12), per Mike's request — Ship.draw's hull shape is expressed as
                   // fractions of these rather than fixed pixel literals, so it scales automatically.
-                  // Deliberately visual-only: the ram/enemy-bullet hitbox tolerances below are
-                  // unchanged, same judgment call as an earlier round's bullet-width-only sizing change
-                  // (see the design brief) — flagging in case the intent was to also grow the hitbox.
+                  // The ship's hit box is sized directly off w/h too (half-width/half-height), per
+                  // Mike's request that it be as large as the ship's image — see CollisionSystem
+                  // ._shipVsWorld (ram/enemy-bullet checks) and Bomb (direct-hit-on-ship checks),
+                  // which read this.w/this.h rather than their own separate tolerance constants.
     startYOffset: -8,          // relative to ground level
     acceleration: 700,          // horizontal (Left/Right) thrust
     // Vertical (Up/Down) is a flat rate, not a thrust, per Mike's request: hold the key and the ship
@@ -89,7 +80,7 @@ export const CONFIG = {
     // verticalEaseRate to go back to stopping almost as soon as the key comes up.
     verticalCoastRate: 4,
     drag: 0.9941,
-    maxSpeed: 600,
+    maxSpeed: 700,
     minFlightAltAboveGround: 45, // flight floor = groundY - this
     flightCeilingY: 50,
     autoGlideSpeed: 260,
@@ -98,37 +89,26 @@ export const CONFIG = {
     bulletOffsetX: 16,
     burstSize: 8,
     burstInterval: 0.06,
-    burstCooldown: 0.4,
-    ramRoamerTolX: 18, ramRoamerTolY: 16, // 30% up with the roamer sprite (was 14/12)
-    ramBomberTolX: 16, ramBomberTolY: 14,
-    enemyBulletTolX: 11, enemyBulletTolY: 9,
-    landDist: 20, // per Mike's request (round 19): board/land are key-triggered again (press A), not
-                  // automatic — but landing still requires being close to a landable surface's resting
-                  // height (open ground, or a rooftop with a landing pad) AND moving slowly (see
-                  // landSpeedFrac below). This is that distance tolerance — how close counts as "close
-                  // enough" when A is pressed. (Was `landContactTol: 8`, a pure-touch tolerance, for one
-                  // round — round 18 — when landing briefly had no key and no speed check at all; both
-                  // are back now, per Mike's follow-up request, along with a wider tolerance since the
-                  // player now has to actively line up the press rather than just touching down.)
-    landSpeedFrac: 0.1, // fraction of maxSpeed that counts as "moving slowly enough" to land when A is
-                        // pressed — 189px/s. Reused from the value validated in an earlier round's
-                        // physics simulation (see design brief): loose enough to land comfortably, but
-                        // safely below the speed reached by a couple hundred ms of ordinary thrust, so a
-                        // player who's still accelerating away can't accidentally satisfy it.
+    burstCooldown: 0.5,
+    landDist: 30, 
+    landSpeedFrac: 0.1, // fraction of maxSpeed that counts as "moving slowly enough" to land.
     boardDist: 16,
     boardLiftHeight: 24, // on boarding, the ship visibly lifts this many px above wherever it boarded
                          // (clamped to flightCeilingY) before handing control to the player — purely a
                          // "you're airborne now" visual cue, not load-bearing for any anti-re-land logic
                          // (board/land are explicit A-key presses now, with OS key-repeat filtered out —
                          // see Input — so there's no passive-retrigger risk to guard against).
-    invulnAfterRespawn: 1.5,
+    invulnAfterRespawn: 2,
   },
   pilot: {
     w: 10, h: 20,
-    speed: 154,
+    speed: 100,
     startOffsetFromShip: 100,
-    ladderClimbSpeedFactor: 0.7,
-    ladderProximity: 6,
+    ladderClimbSpeedFactor: 0.5,
+    ladderProximity: 10,
+    // how long it takes to ease onto the ladder's centerline once a climb starts, per Mike's request
+    // — the camera follows the pilot's x, so snapping it instantly jerked the whole viewport sideways
+    ladderCenterSlideDuration: 0.3,
     doorProximity: 10,
     shootCooldown: 0.4,
     bulletSpeed: 12,
@@ -185,7 +165,7 @@ export const CONFIG = {
                       // see Roamer.easeTilts and Roamer.draw
     respawnTimerBase: 5, respawnTimerRandRange: 4,
     initialRespawnTimer: 4,
-    spawnDistMin: 250, spawnDistRandRange: 550,
+    maxAlive: 32,
     spawnYBase: -20, spawnYRandRange: 80,
     descendTargetYBase: 200, descendTargetYRandRange: 120,
     bulletTolX: 13, bulletTolY: 26, // 30% up with the sprite (was 10/20)
@@ -209,37 +189,58 @@ export const CONFIG = {
   },
   bomber: {
     speed: 90, zigzagAmp: 45, zigzagFreq: 1.8,
-    maxAlive: 2,
+    // matches the hull literals in Bomber.draw (-14,0 / -4,-6 / 14,0 / -4,6) — added for collision
+    // purposes (Kamikaze-vs-bomber body overlap) rather than to drive the drawing, unlike Roamer/
+    // Ship/Kamikaze, whose draw() already derives its shape from w/h
+    w: 28, h: 12,
+    maxAlive: 3,
+    hp: 2, // per Mike's request — a bomber survives one hit (bullet or ram) and goes down on the second
     initialRespawnTimer: 6,
     respawnTimerBase: 8, respawnTimerRandRange: 6,
     bombTimerMin: 1.5, bombTimerRandRange: 2,
     reloadTimerBase: 3, reloadTimerRandRange: 3,
-    // Spawn and despawn distances are measured from the EDGE of the visible area, not from the
-    // camera, because the viewport is no longer a fixed 960px (see world.maxCanvasW). As absolute
-    // distances — they were spawn 500-800, despawn 900 — a wide window put both inside the view:
-    // bombers appeared out of nowhere in plain sight and vanished at the screen edge, which is what
-    // Mike saw as "bombers are disappearing". Written as margins they hold at any width. Keep
-    // despawnMargin comfortably above spawnMarginMin+spawnMarginRandRange, or a bomber can spawn
-    // already past its own despawn threshold and blink out on its first frame.
-    despawnMargin: 420,
+    // Spawn distance is measured from the EDGE of the visible area, not from the camera, because the
+    // viewport is no longer a fixed 960px (see world.maxCanvasW) — an absolute distance would put a
+    // wide window's edge inside the view, and bombers would appear out of nowhere in plain sight.
     // spawnMarginMin has to clear the bomber's own draw margin (24px in Bomber.draw), or a bomber
     // spawned at the minimum is already partly drawn at the screen edge — it pops into being in view
-    // rather than flying in from outside it
+    // rather than flying in from outside it. There is no despawn-by-distance any more, per Mike's
+    // request that bombers persist even off-screen rather than quietly vanishing once they fly far
+    // enough away — they simply keep flying (and the world wraps) until actually destroyed.
     spawnMarginMin: 40, spawnMarginRandRange: 300,
     baseYMin: 110, baseYRandRange: 70,
     bulletTolX: 12, bulletTolY: 20,
+  },
+  // A new enemy type, per Mike's request: idles/patrols until the player's ship comes within
+  // triggerRange, then commits fully to closing the distance and ramming it. Wave-independent, same
+  // footing as bombers — no per-wave quota, just a persistent threat that keeps trickling in.
+  kamikaze: {
+    w: 22, h: 14,
+    hp: 1, // one hit and it's down — dangerous up close, fragile at range
+    maxAlive: 2,
+    initialRespawnTimer: 10,
+    respawnTimerBase: 14, respawnTimerRandRange: 10,
+    spawnYBase: -20, spawnYRandRange: 80,
+    triggerRange: 800, // true radial px distance to the player that triggers pursuit.
+    wanderSpeed: 80, // idle drift while no ship is in range — never holds perfectly still
+    // closing speed once it commits to an attack run — climbs slowly wave over wave, per Mike's
+    // request, capped so it's never flatly unavoidable even deep into a long run
+    baseChaseSpeed: 110, chaseSpeedPerWave: 6, maxChaseSpeed: 220,
+    turnEaseRate: 8, // how fast its drawn heading eases toward its actual direction of travel
+    bulletTolX: 12, bulletTolY: 8,
+    // if two kamikazes touch each other (rather than the ship), they take each other out in one much
+    // bigger blast than either dies with alone, per Mike's request — see Game.explodeKamikazePair.
+    // Well above enemyKillCount (16) and in the same league as a building collapsing (64).
+    collisionDebrisCount: 60,
   },
   bomb: {
     fallSpeed: 130,
     blastXTol: 26, blastYTol: 30,
     // direct bomb-body collision box (a bomb falling straight into the ship or the on-foot pilot,
-    // as opposed to the blast tolerances above). Explicit tolerances rather than something derived
-    // from ship.w/h: the ship's 52x24 size is deliberately visual-only (see the note on ship.w), so
-    // deriving from it would give the bomb a 62x34 hitbox against a hull whose every other hitbox
-    // is 9-16px. Ship values match ramBomberTolX/Y — same bomber ordnance, same scale as the rest
-    // of the ship's hitboxes. Pilot values match the pilot's true 10x20 drawn size plus the bomb's
-    // 5px radius, which is where they already sat.
-    directHitShipTolX: 16, directHitShipTolY: 14,
+    // as opposed to the blast tolerances above). The ship side reads ship.w/2 and ship.h/2 directly
+    // (see Bomb._directHitPlayer) rather than its own tolerance constants, per Mike's request that
+    // the ship's hit box match its image size everywhere. Pilot values match the pilot's true 10x20
+    // drawn size plus the bomb's 5px radius, which is where they already sat.
     directHitPilotTolX: 10, directHitPilotTolY: 15,
     humanBlastRadius: 50, // circular blast radius for killing nearby humans, per Mike's request — see
                           // the humanoid-kill check in Bomb.explode, which measures true radial
@@ -250,8 +251,11 @@ export const CONFIG = {
     debrisOnExplode: 50,
   },
   captive: {
-    fallSpeed: 70,
-    catchTolX: 18, catchTolY: 18,
+    // falls from rest and accelerates, per Mike's request (previously a flat 70px/s) — tuned gentler
+    // than debris.gravity (220): a released captive drifts into the fall rather than dropping like a
+    // fragment blown off an explosion.
+    fallGravity: 120,
+    catchTolX: 20, catchTolY: 20,
     surviveStoryHeight: 25, surviveStories: 2,
     rooftopDropTol: 40,
     roofSettleMin: 2, roofSettleRandRange: 2,
@@ -282,7 +286,11 @@ export const CONFIG = {
                       // request for more visual separation between the rooftop and the item sitting on it
   },
   scoring: {
-    perEnemyKilled: 25,
+    // split per enemy type, per Mike's request — previously one flat perEnemyKilled covered both.
+    // Same 25 for each for now, since no differing point value was specified; tune independently here.
+    perRoamerKilled: 25,
+    perBomberKilled: 25,
+    perKamikazeKilled: 30, // a little more than the others — it's the more aggressive threat
     perBombShotDown: 15,
     perHumanLost: -50,
     perBuildingDestroyed: -100,
@@ -320,13 +328,17 @@ export const CONFIG = {
   respawn: {
     debrisStageDuration: 0.9,
     showLivesDuration: 2.0,
+    // how long the GAME OVER screen waits after the last ship/pilot is destroyed before it appears,
+    // per Mike's request — so the final death's explosion plays out undisturbed first, the same way
+    // debrisStageDuration holds off the "SHIP LOST" overlay above.
+    gameOverDisplayDelay: 0.9,
   },
   camera: {
     // after the ship is destroyed the camera rides its debris cloud rather than freezing where the
     // ship was, per Mike's request — see Camera.update
     // The drift needs no follow/ease gains: it reproduces the debris' own motion (see Camera.update)
     // rather than steering toward it, so the only thing left to tune is how long the stop takes.
-    driftStopTime: 0.5,  // how long it takes to slow to a full stop once the last fragment burns out
+    driftStopTime: 1,  // how long it takes to slow to a full stop once the last fragment burns out
   },
   // ---- audio (see plans/sound-effects-plan.md and src/audio/) ------------------------------------
   // Everything is synthesised at runtime through the Web Audio API — no sample files, so the game
@@ -345,7 +357,7 @@ export const CONFIG = {
     // pan across the whole 4800px world, where everything audible would sit near centre.
     panStrength: 0.85,   // 1 = hard left/right at the screen edges; less keeps some centre presence
     audibleMargin: 320,  // px beyond the screen edge a sound can still be heard at all
-    edgeVolume: 0.15,    // how loud a sound is at that outer limit — it fades to this, never cuts off
+    edgeVolume: 0.01,    // how loud a sound is at that outer limit — it fades to this, never cuts off
     maxVoicesPerSound: 4, // concurrency cap per sound id, so a burst of them can't stack into clipping
     engine: {
       baseHz: 42, speedHz: 5,  // hum pitch = baseHz + speedHz * (speed/maxSpeed)
@@ -355,6 +367,8 @@ export const CONFIG = {
     },
     roamerDrone: { baseHz: 128, volume: 0.31, perRoamer: 0.05, lfoHz: 1.0, lfoPerRoamer: 0.18 },
     bomberDrone: { baseHz: 64, volume: 0.23, perBomber: 0.05, wobbleHz: 1.8, wobbleCents: 22 },
+    // higher and faster-pulsing than the other two, so a kamikaze's presence reads as more urgent
+    kamikazeDrone: { baseHz: 200, volume: 0.22, perKamikaze: 0.06, lfoHz: 2.6, lfoPerKamikaze: 0.3 },
     bombWhistle: { fromHz: 1250, toHz: 400, volume: 0.1 },
     // rate limits for sounds that would otherwise fire many times a second
     footstepGap: 0.26, climbTickGap: 0.22, civilianYelpGap: 1.0,
@@ -369,7 +383,7 @@ export const CONFIG = {
       snare:    '...X....X....X..',
       hatClosed:'XXX.X.XXXX.XX.XX',
       hatOpen:  '.....X....X.....',
-      kickVolume: 0.9, snareVolume: 0.7, hatClosedVolume: 0.22, hatOpenVolume: 0.18,
+      kickVolume: 0.9, snareVolume: 0.7, hatClosedVolume: 0.22, hatOpenVolume: 0.2,
       // the standard Web Audio clock: schedule this far ahead, waking this often, so the beat stays
       // tight even when the JS event loop is busy with a frame
       lookahead: 0.1, tickInterval: 0.025,

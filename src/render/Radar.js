@@ -49,6 +49,7 @@ export class Radar {
 
     for(const r of game.roamers) if(r.alive){ ctx.fillStyle='#c98bff'; ctx.fillRect(this._mapX(r.x)-1,this._mapY(r.y)-1,2,2); }
     for(const bo of game.bombers) if(bo.alive){ ctx.fillStyle='#ff8a4d'; ctx.fillRect(this._mapX(bo.x)-1,this._mapY(bo.y)-1,2,2); }
+    for(const k of game.kamikazes) if(k.alive){ ctx.fillStyle='#ff3b3b'; ctx.fillRect(this._mapX(k.x)-1,this._mapY(k.y)-1,2,2); }
     for(const bm of game.bombs){ ctx.fillStyle='#ff6a3d'; ctx.fillRect(this._mapX(bm.x)-1,this._mapY(bm.y)-2,2,4); }
 
     ctx.fillStyle='#8ff0ff';

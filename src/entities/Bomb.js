@@ -51,8 +51,10 @@ export class Bomb {
 
     // Direct bomb-body collision while in flight.
     if(game.mode==='flight' && ship.alive && ship.invuln<=0){
-      const hitShipX = Math.abs(wrapDelta(ship.x, this.x)) < CONFIG.bomb.directHitShipTolX;
-      const hitShipY = Math.abs(ship.y - this.y) < CONFIG.bomb.directHitShipTolY;
+      // the ship's hit box is its actual image size, per Mike's request — see CollisionSystem
+      // ._shipVsWorld, which reads this same ship.w/2, ship.h/2 pair
+      const hitShipX = Math.abs(wrapDelta(ship.x, this.x)) < ship.w/2;
+      const hitShipY = Math.abs(ship.y - this.y) < ship.h/2;
       if(hitShipX && hitShipY){
         game.loseLife();
         this.explode(game, true);

@@ -23,14 +23,14 @@
 </head>
 <body>
 <div id="wrap">
-  <h1>GROUND ASSAULT — v2 (chosen direction, revised)</h1>
+  <h1>GROUND ASSAULT</h1>
   <canvas id="c" width="960" height="540"></canvas>
   <div id="hud"><span id="score">SCORE 0</span><span id="lives">SHIPS 3</span><span id="modeLabel">ON FOOT</span><span id="itemsLabel"></span><span id="audioLabel">SOUND ON (M)</span><span id="speedCtl">SIM <select id="speedSelect" title="Simulation speed — for faster testing"><option value="1">1x</option><option value="2">2x</option><option value="4">4x</option><option value="8">8x</option></select></span></div>
   <div id="legend">
-    <b>On foot:</b> <kbd>&larr;</kbd><kbd>&rarr;</kbd> run (incl. rooftops) &nbsp; <kbd>&uarr;</kbd> climb ladder &nbsp; <kbd>&darr;</kbd> climb down &nbsp; <kbd>SPACE</kbd> shoot straight up (hits bombs too) &nbsp; <kbd>A</kbd> board the ship when standing next to it &nbsp; <kbd>S</kbd> detonate a carried superbomb (clears every roamer and bomber on screen) &nbsp; <kbd>F</kbd> apply a carried fire-suppressant tank (fully repairs a nearby damaged building) &nbsp;
+    <b>On foot:</b> <kbd>&larr;</kbd><kbd>&rarr;</kbd> run (incl. rooftops) &nbsp; <kbd>&uarr;</kbd> climb ladder &nbsp; <kbd>&darr;</kbd> climb down &nbsp; <kbd>SPACE</kbd> shoot straight up (hits bombs too) &nbsp; <kbd>A</kbd> board the ship when standing next to it &nbsp; <kbd>S</kbd> detonate a carried superbomb (clears every enemy on screen) &nbsp; <kbd>F</kbd> apply a carried fire-suppressant tank (fully repairs a nearby damaged building) &nbsp;
     <b>In flight:</b> <kbd>&larr;</kbd><kbd>&rarr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd> thrust &nbsp; <kbd>SPACE</kbd> fire in short bursts (pauses to cool down) &nbsp; <kbd>S</kbd> detonate a carried superbomb &nbsp; <kbd>A</kbd> land when flying slow and close over the ground or a landing-pad rooftop &nbsp;
     <b>Pickups:</b> superbombs and fire-suppressant tanks occasionally appear on rooftops &mdash; walk over one on foot to collect it &nbsp;
-    <b>Testing:</b> <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd> set sim speed to 1x/2x/4x/8x (runs the game logic faster than real time so you don't have to wait around) &nbsp; <kbd>P</kbd> restart after GAME OVER &nbsp; <kbd>M</kbd> mute/unmute all sound and music
+    <b>Testing:</b> <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd> set sim speed to 1x/2x/4x/8x (runs the game logic faster than real time so you don't have to wait around) &nbsp; <kbd>P</kbd> pause/unpause, or restart after GAME OVER &nbsp; <kbd>M</kbd> mute/unmute all sound and music
   </div>
 </div>
 <script type="module" src="./src/main.js"></script>

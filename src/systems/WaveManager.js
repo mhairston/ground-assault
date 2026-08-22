@@ -31,25 +31,45 @@ export class WaveManager {
     this.statsToShow = null;
     this.civDeaths = 0;
     this.civAbductions = 0;
+    this.civRescues = 0;
     // enemies (roamers AND bombers) destroyed while this wave was in progress — bullet, ram, or
     // superbomb kills all count; a roamer escaping off-screen with a captive does NOT (that's an
     // escape, not a destroy). Displayed on the WAVE COMPLETE overlay, per Mike's request.
     this.enemiesDestroyed = 0;
     this.releaseTimer = CONFIG.roamer.initialRespawnTimer;
+    // lifetime totals across the whole game (never reset by updateTransition, only here) — per
+    // Mike's request to show the same stats block again at GAME OVER, which needs the full run's
+    // numbers rather than whatever the in-progress wave happens to hold.
+    this.totalCivDeaths = 0;
+    this.totalCivAbductions = 0;
+    this.totalCivRescues = 0;
+    this.totalEnemiesDestroyed = 0;
   }
 
   get word(){ return WaveManager.word(this.number); }
 
-  recordCivDeath(){ this.civDeaths++; }
-  recordCivAbduction(){ this.civAbductions++; }
-  recordEnemyDestroyed(n = 1){ if(!this.complete) this.enemiesDestroyed += n; }
+  // final, run-wide stats for the GAME OVER screen — see the lifetime totals above
+  get finalStats(){
+    return { destroyed: this.totalEnemiesDestroyed, abductions: this.totalCivAbductions, deaths: this.totalCivDeaths, rescues: this.totalCivRescues };
+  }
+
+  recordCivDeath(){ this.civDeaths++; this.totalCivDeaths++; }
+  recordCivAbduction(){ this.civAbductions++; this.totalCivAbductions++; }
+  recordCivRescue(){ this.civRescues++; this.totalCivRescues++; }
+  recordEnemyDestroyed(n = 1){ this.totalEnemiesDestroyed += n; if(!this.complete) this.enemiesDestroyed += n; }
   // superbomb kills remove roamers from the array immediately (unlike a bullet kill, which just
   // flags alive=false and lets the next Roamer.updateAll pass count/filter it) — so that path has to
   // credit the resolved count itself, or a superbombed wave could never register as cleared.
   recordResolved(n){ if(!this.complete) this.resolved += n; }
 
   releaseRoamers(){
-    const n = Math.min(WaveManager.releaseRateFor(this.number), this.quota - this.spawned);
+    // capped at CONFIG.roamer.maxAlive concurrently alive, per Mike's request — if the population's
+    // already at (or over, from spawns before a kill run) the cap, this releases none at all rather
+    // than spawning over the limit; spawned stays short of quota and tickRelease just keeps trying
+    // every timer tick until roamers die off and room opens back up
+    const alive = this.game.roamers.reduce((n,r) => n + (r.alive ? 1 : 0), 0);
+    const room = Math.max(0, CONFIG.roamer.maxAlive - alive);
+    const n = Math.min(WaveManager.releaseRateFor(this.number), this.quota - this.spawned, room);
     for(let i=0;i<n;i++) Roamer.spawn(this.game);
     this.spawned += n;
   }
@@ -78,7 +98,7 @@ export class WaveManager {
 
   triggerComplete(){
     this.complete = true;
-    this.statsToShow = { number: this.number, deaths: this.civDeaths, abductions: this.civAbductions, destroyed: this.enemiesDestroyed };
+    this.statsToShow = { number: this.number, deaths: this.civDeaths, abductions: this.civAbductions, destroyed: this.enemiesDestroyed, rescues: this.civRescues };
     this.completeTimer = CONFIG.wave.completeOverlayDuration;
     // flat per-wave bonus (Mike specified 500 for wave one; no growth formula was given, so every
     // wave awards the same flat bonus — flag this for confirmation)
@@ -106,7 +126,7 @@ export class WaveManager {
     this.game.sound.setMusicWave(this.number);
     this.quota = WaveManager.quotaFor(this.number);
     this.spawned = 0; this.resolved = 0;
-    this.civDeaths = 0; this.civAbductions = 0; this.enemiesDestroyed = 0;
+    this.civDeaths = 0; this.civAbductions = 0; this.civRescues = 0; this.enemiesDestroyed = 0;
     this.complete = false; this.statsToShow = null;
     // the civilian pool grows every wave — 3 more join the world each time a new wave starts, per
     // Mike's request

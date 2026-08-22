@@ -129,10 +129,28 @@ export const ONE_SHOTS = {
     noise(ctx, d, { dur:0.16, gain:0.3*o.gain, filter:'highpass', from:1800, to:400 });
     tone(ctx, d, { type:'square', from:260, to:60, dur:0.14, gain:0.14*o.gain });
   }},
+  // a hit that doesn't finish the job — a bomber takes two, per Mike's request. Sharper and much
+  // shorter than bomberDeath below, so the two are tellable apart: this one says "hit, but still flying".
+  bomberHit: { bus:'sfx', dur:0.14, maxVoices:4, render:(ctx,d,o)=>{
+    noise(ctx, d, { dur:0.08, gain:0.22*o.gain, filter:'highpass', from:2200, to:900 });
+    tone(ctx, d, { type:'square', from:520, to:300, dur:0.09, gain:0.12*o.gain });
+  }},
   // same crack as a roamer, pitched down so the two are tellable apart in a crowded fight
   bomberDeath: { bus:'sfx', dur:0.24, maxVoices:4, render:(ctx,d,o)=>{
     noise(ctx, d, { dur:0.2, gain:0.3*o.gain, filter:'highpass', from:1200, to:220 });
     tone(ctx, d, { type:'square', from:170, to:40, dur:0.18, gain:0.15*o.gain });
+  }},
+  // a small detonation rather than a plain crack — lowpass noise burst like a bomb impact, since a
+  // kamikaze goes out with a bang, not a whimper
+  kamikazeDeath: { bus:'sfx', dur:0.3, maxVoices:4, render:(ctx,d,o)=>{
+    noise(ctx, d, { dur:0.24, gain:0.32*o.gain, filter:'lowpass', from:1400, to:150 });
+    tone(ctx, d, { type:'square', from:200, to:50, dur:0.2, gain:0.16*o.gain });
+  }},
+  // two kamikazes meeting head-on, per Mike's request — a real boom, noticeably bigger than a single
+  // kamikazeDeath, in the same weight class as buildingCollapse
+  kamikazeCollision: { bus:'sfx', dur:0.5, maxVoices:2, render:(ctx,d,o)=>{
+    noise(ctx, d, { dur:0.42, gain:0.42*o.gain, filter:'lowpass', from:3000, to:80, Q:1.8 });
+    tone(ctx, d, { type:'sawtooth', from:150, to:35, dur:0.4, gain:0.22*o.gain });
   }},
 
   // --- bombs ---
@@ -285,6 +303,33 @@ export const LOOPS = {
         const t = ctx.currentTime;
         g.gain.setTargetAtTime(SILENT, t, 0.2);
         a.stop(t + 1.0); b.stop(t + 1.0); wobble.stop(t + 1.0);
+      },
+    };
+  }},
+
+  // Higher-pitched and faster-pulsing than either of the above, so a kamikaze's presence reads as
+  // more urgent — the same triangle-plus-tremolo shape as roamerDrone, just tuned sharper.
+  kamikazeDrone: { bus:'ambient', start(ctx, dest){
+    const cfg = CONFIG.audio.kamikazeDrone;
+    const osc = ctx.createOscillator(); osc.type = 'triangle'; osc.frequency.value = cfg.baseHz;
+    const g = ctx.createGain(); g.gain.value = SILENT;
+    const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = cfg.lfoHz;
+    const lfoDepth = ctx.createGain(); lfoDepth.gain.value = 0;
+    lfo.connect(lfoDepth).connect(g.gain);
+    osc.connect(g).connect(dest);
+    osc.start(); lfo.start();
+    return {
+      set({ count = 0 }){
+        const t = ctx.currentTime;
+        const level = count > 0 ? cfg.volume + cfg.perKamikaze*(count-1) : SILENT;
+        g.gain.setTargetAtTime(level, t, 0.4);
+        lfoDepth.gain.setTargetAtTime(count > 0 ? level*0.5 : 0, t, 0.4);
+        lfo.frequency.setTargetAtTime(cfg.lfoHz + cfg.lfoPerKamikaze*Math.max(0,count-1), t, 0.4);
+      },
+      stop(){
+        const t = ctx.currentTime;
+        g.gain.setTargetAtTime(SILENT, t, 0.2);
+        osc.stop(t + 1.0); lfo.stop(t + 1.0);
       },
     };
   }},

@@ -30,6 +30,13 @@ export class SoundManager {
     this.loops = new Map();     // key -> live loop handle
     this.voices = new Map();    // sound id -> end times of the voices currently sounding
     this.lastPlayed = new Map(); // sound id -> when it last fired, for minGap
+    // set once the game is over (see Game.loseLife) to block every NEW sound from that point on, per
+    // Mike's request that all audio stop until the game is restarted — the world keeps simulating
+    // after GAME OVER (bombs still land, roamers still die), and without this every one of those kept
+    // triggering fresh one-shots and ambient loops right through the GAME OVER screen. Deliberately
+    // doesn't touch anything already playing: the GAME OVER stinger and the music's fade-out are
+    // triggered before this flips, so they're heard out rather than cut off mid-note.
+    this.locked = false;
   }
 
   get enabled(){ return this.ctx !== null && !this.muted; }
@@ -65,6 +72,12 @@ export class SoundManager {
     this.music = new DrumMachine(this.ctx, this.buses.music);
   }
 
+  // Suspends/resumes the whole audio graph, sample-accurately, so a paused game goes fully silent —
+  // engine hum, drones, whistles, the drum track — and picks back up exactly where it left off rather
+  // than needing every loop and scheduler to know about pause separately.
+  pause(){ if(this.ctx && this.ctx.state === 'running') this.ctx.suspend(); }
+  resume(){ if(this.ctx && this.ctx.state === 'suspended') this.ctx.resume(); }
+
   toggleMute(){
     this.muted = !this.muted;
     if(this.ctx){
@@ -79,7 +92,7 @@ export class SoundManager {
   // x is a WORLD x. Omit it for sounds that aren't anywhere in particular (UI, the player's own
   // actions) and they play centred at full volume.
   play(id, { x = null, gain = 1 } = {}){
-    if(!this.enabled) return;
+    if(!this.enabled || this.locked) return;
     const voice = ONE_SHOTS[id];
     if(!voice) return; // unknown id: silently ignored, never a crash in the middle of a firefight
     const now = this.ctx.currentTime;
@@ -101,7 +114,7 @@ export class SoundManager {
   // to the voice id for the single-instance loops. Starting an already-running key does nothing, so
   // callers can call this every frame without tracking state themselves.
   startLoop(id, key = id){
-    if(!this.ctx || this.loops.has(key)) return;
+    if(!this.ctx || this.locked || this.loops.has(key)) return;
     const loop = LOOPS[id];
     if(!loop) return;
     let dest = this.buses[loop.bus];

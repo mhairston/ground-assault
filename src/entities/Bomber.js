@@ -30,9 +30,11 @@ export class Bomber {
     this.baseY = baseY;
     this.y = baseY;
     this.dir = dir;
+    this.w = CONFIG.bomber.w; this.h = CONFIG.bomber.h;
     this.phase = Math.random()*Math.PI*2;
     this.vx = 0; this.vy = 0; // actual per-frame motion, so a kill can hand it to the debris (see Game.killBomber)
     this.alive = true;
+    this.hp = CONFIG.bomber.hp;
     this.bombTimer = CONFIG.bomber.bombTimerMin + Math.random()*CONFIG.bomber.bombTimerRandRange;
   }
 
@@ -62,10 +64,16 @@ export class Bomber {
     this.vy = (this.y - prevY)/dt;
     this.bombTimer -= dt;
     if(this.bombTimer <= 0) this._dropBomb(game);
-    // despawn once it's flown well clear of the visible area so the list doesn't grow forever —
-    // measured past the screen edge (W/2), never at a fixed distance that a wide window would put
-    // on-screen
-    if(Math.abs(wrapDelta(game.camera.x, this.x)) > W/2 + CONFIG.bomber.despawnMargin) this.alive = false;
+  }
+
+  // a bullet hit that doesn't finish the job (per Mike's request: two hits to destroy) just plays its
+  // own feedback; the actual destroy path — score, debris, wave accounting — only fires once hp runs
+  // out, via Game.killBomber. Ramming still kills in one hit regardless of hp (see CollisionSystem
+  // ._shipVsWorld): the ship is destroyed in the same collision, so it's a mutual kill either way.
+  hit(game){
+    this.hp--;
+    if(this.hp <= 0){ game.killBomber(this); return; }
+    game.sound.play('bomberHit', { x: this.x });
   }
 
   // drop straight down from wherever it happens to be right now — onto a building if it's flying
@@ -93,7 +101,9 @@ export class Bomber {
     ctx.save();
     ctx.translate(sx, this.y);
     ctx.scale(this.dir, 1); // faces whichever direction it's actually flying
-    ctx.fillStyle = '#ff8a4d';
+    // flashes the same "one hit from destruction" red Building uses, so a damaged bomber reads as
+    // damaged rather than looking untouched right up until it explodes
+    ctx.fillStyle = (this.hp < CONFIG.bomber.hp && Math.floor(performance.now()/150)%2===0) ? '#ff4a4a' : '#ff8a4d';
     ctx.beginPath();
     ctx.moveTo(-14,0); ctx.lineTo(-4,-6); ctx.lineTo(14,0); ctx.lineTo(-4,6); ctx.closePath();
     ctx.fill();

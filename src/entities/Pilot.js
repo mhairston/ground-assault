@@ -28,6 +28,9 @@ export class Pilot {
     this.fireSuppressantCount = 0;
     this.hidden = false;
     this.shootCooldown = 0;
+    this.ladderSlideFromX = 0;
+    this.ladderSlideDeltaX = 0;
+    this.ladderSlideT = CONFIG.pilot.ladderCenterSlideDuration; // already "finished" — no slide until one actually starts
   }
 
   get midY(){ return this.y + this.h/2; }
@@ -72,9 +75,31 @@ export class Pilot {
     else this._updateOnGround(dt, game, speed);
   }
 
+  // kicks off the ease onto the ladder's centerline — called once, right when a climb starts (see
+  // both call sites below); wrapDelta gives the shortest signed distance so the slide is correct
+  // across the world seam too
+  _startLadderSlide(targetX){
+    this.ladderSlideFromX = this.x;
+    this.ladderSlideDeltaX = wrapDelta(this.x, targetX);
+    this.ladderSlideT = 0;
+  }
+
+  // eases the pilot's x onto the ladder's centerline over ladderCenterSlideDuration rather than
+  // snapping instantly, per Mike's request — the camera follows this.x (see below), so an instant
+  // snap would jerk the whole viewport sideways the moment a climb starts
+  _updateLadderSlide(dt){
+    const dur = CONFIG.pilot.ladderCenterSlideDuration;
+    if(this.ladderSlideT >= dur) return;
+    this.ladderSlideT = Math.min(dur, this.ladderSlideT + dt);
+    const t = this.ladderSlideT / dur;
+    const eased = t*t*(3-2*t); // smoothstep — eases in and out rather than a constant-speed slide
+    this.x = wrapX(this.ladderSlideFromX + this.ladderSlideDeltaX*eased);
+  }
+
   _updateClimbing(dt, game, speed){
     const input = game.input;
     this.vx = 0;
+    this._updateLadderSlide(dt);
     const climbDir = (input.isDown('ArrowDown') ? 1 : 0) - (input.isDown('ArrowUp') ? 1 : 0);
     this.y += climbDir * speed * CONFIG.pilot.ladderClimbSpeedFactor * dt;
     // hand-over-hand cycle, advanced only while actually moving on the ladder. Unlike the walk cycle
@@ -116,6 +141,7 @@ export class Pilot {
     // ladder before Up/Down starts climbing it
     if(b.hasLadder && ladderDist < CONFIG.pilot.ladderProximity && input.isDown('ArrowDown')){
       this.climbing = true; this.ladderRef = b; this.roofRef = null;
+      this._startLadderSlide(b.ladderX);
     }
     // NOTE: no early return above — the ship can be parked on a rooftop, so a player standing up
     // there needs to be able to board it too (see Game.tryBoardOrLand, on the A key).
@@ -137,6 +163,7 @@ export class Pilot {
     // ladder before Up starts climbing it
     if(b && !b.destroyed && b.hasLadder && d < CONFIG.pilot.ladderProximity && input.isDown('ArrowUp')){
       this.climbing = true; this.ladderRef = b;
+      this._startLadderSlide(b.ladderX);
     }
 
     const doorDist = (b && !b.destroyed) ? Math.abs(wrapDelta(this.x, b.doorX)) : 999;

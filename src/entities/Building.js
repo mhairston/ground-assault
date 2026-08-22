@@ -1,11 +1,15 @@
 import { CONFIG, GROUND_Y, W, BUILDING_STYLES } from '../config.js';
-import { relX, wrapDelta } from '../core/geometry.js';
+import { relX, wrapX, wrapDelta } from '../core/geometry.js';
 
 const BUILDING_MAX_HP = CONFIG.building.maxHp;
 const HOLE_RADIUS = CONFIG.building.holeRadius; // 4x the original 7px hole radius, per Mike's request
 // keep hole centers clamped so the (much bigger) circle still reads as contained within the
 // building's silhouette
 const HOLE_MARGIN = HOLE_RADIUS - 1;
+// the ladder is drawn slightly right of the building's true center (see _drawLadder) — this is the
+// single source of truth for that offset, so Pilot can center on the ladder's actual world x rather
+// than the building's
+const LADDER_OFFSET_X = 4;
 
 export class Building {
   // smaller buildings have less HP than bigger ones, per Mike's request — scaled off footprint area
@@ -41,6 +45,7 @@ export class Building {
   // the sprite's y is its TOP edge; feet sit at y + h. Standing height on this roof = roofY - h.
   standY(spriteH){ return this.roofY - spriteH; }
   get doorX(){ return this.x - this.width/2 + 14; }
+  get ladderX(){ return wrapX(this.x + LADDER_OFFSET_X); }
   containsX(x){ return Math.abs(wrapDelta(x, this.x)) < this.width/2; }
 
   // fire-suppressant repair: back to full HP with every hole patched (see Game.useFireSuppressant,
@@ -205,7 +210,7 @@ export class Building {
 
   _drawLadder(ctx, sx, roofY){
     ctx.strokeStyle = '#8a8f9a';
-    const lx = sx + 4;
+    const lx = sx + LADDER_OFFSET_X;
     const ladderTop = roofY;
     ctx.beginPath(); ctx.moveTo(lx-4,GROUND_Y); ctx.lineTo(lx-4,ladderTop); ctx.moveTo(lx+4,GROUND_Y); ctx.lineTo(lx+4,ladderTop); ctx.stroke();
     for(let ly=GROUND_Y-6; ly>ladderTop; ly-=10){ ctx.beginPath(); ctx.moveTo(lx-4,ly); ctx.lineTo(lx+4,ly); ctx.stroke(); }

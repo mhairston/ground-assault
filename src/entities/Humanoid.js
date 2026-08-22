@@ -135,6 +135,8 @@ export class Humanoid {
     this.animPhase += dt*CONFIG.humanoid.animSpeed;
     this.x = wrapX(this.x + Math.sign(dx)*Math.min(Math.abs(dx), FLEE_SPEED*dt));
     if(Math.abs(dx) < CONFIG.humanoid.doorReachDist){
+      // exactly at the door, per Mike's request, rather than left wherever the last step happened to land
+      this.x = wrapX(this.targetBuilding.doorX);
       this.safe = true; this.fleeing = false; this.moving = false; this.animPhase = 0;
       game.sound.play('civilianSafe', { x: this.x });
       for(const r of game.roamers) if(r.target === this) r.target = null;

@@ -10,6 +10,7 @@ import { Pilot } from './entities/Pilot.js';
 import { Ship } from './entities/Ship.js';
 import { Roamer } from './entities/Roamer.js';
 import { Bomber } from './entities/Bomber.js';
+import { Kamikaze } from './entities/Kamikaze.js';
 import { Bomb } from './entities/Bomb.js';
 import { PlayerBullet, EnemyBullet } from './entities/Bullet.js';
 import { FallingCaptive } from './entities/FallingCaptive.js';
@@ -49,16 +50,32 @@ export class Game {
 
     this.input = new Input(doc.getElementById('speedSelect'), {
       onBoardOrLand: () => this.tryBoardOrLand(),
-      // P restarts the game once it's over — a no-op any other time so it can't be mashed mid-game
-      onRestart: () => { if(this.gameOver){ this.sound.play('restart'); this.reset(); } },
+      // P restarts the game once it's over; any other time it's underway, it pauses/unpauses instead
+      onP: () => {
+        // unlock before playing the restart cue — sound.locked is still true here, set at GAME OVER
+        // (see loseLife), and reset() itself clears it defensively but only runs afterward
+        if(this.gameOver){ this.sound.locked = false; this.sound.play('restart'); this.reset(); }
+        else this.togglePause();
+      },
       // Browsers block audio until the page has been interacted with, so the very first keypress is
-      // what builds the AudioContext — and the drum track can only start once it exists.
+      // what builds the AudioContext — and the drum track can only start once it exists. Skipped while
+      // paused so that mashing some other key can't accidentally resume the audio context out from
+      // under an intentional pause — only the P handler above (via togglePause) may do that.
       onGesture: () => {
+        if(this.paused) return;
         const fresh = this.sound.ctx === null;
         this.sound.unlock();
         if(fresh && !this.gameOver) this.sound.startMusic();
       },
       onMute: () => this.hud.setAudio(this.sound.toggleMute()),
+    });
+
+    // Switching tabs/apps auto-pauses, per Mike's request — otherwise the whole world (roamers,
+    // bombs, the clock) keeps running unseen and unheard while the player's away. Deliberately does
+    // NOT auto-resume on return: that stays an explicit P, so nothing lurches back into motion the
+    // instant focus comes back.
+    doc.addEventListener('visibilitychange', () => {
+      if(doc.hidden && !this.gameOver && !this.paused) this.togglePause();
     });
 
     this.reset();
@@ -89,12 +106,16 @@ export class Game {
     this.score = 0;
     this.lives = CONFIG.player.startingLives;
     this.gameOver = false;
+    this.gameOverDisplayTimer = 0; // counts down after the final death — see loseLife and Renderer.drawGameOver
+    this.paused = false;
     this.finalHighScores = null;
+    this.finalScore = null;
     this.hud.setScore(this.score);
     this.hud.setLives(this.lives);
 
     this.roamers = [];
     this.bombers = [];
+    this.kamikazes = [];
     this.bombs = [];
     this.playerBullets = [];
     this.enemyBullets = [];
@@ -103,10 +124,12 @@ export class Game {
     this.pickups.reset();
     this.scorches.clear();
     this.bomberRespawn = CONFIG.bomber.initialRespawnTimer;
+    this.kamikazeRespawn = CONFIG.kamikaze.initialRespawnTimer;
     this.superbombFlash = 0;
     // every loop belongs to something that no longer exists after a restart — engine hum, enemy
     // drones, the whistle of bombs that were in the air — so they all go rather than hanging on
     if(this.sound){
+      this.sound.locked = false;
       this.sound.stopAllLoops();
       this.sound.setMusicWave(1);
       this.sound.startMusic(); // no-op if the context isn't unlocked yet, or if it's already running
@@ -150,7 +173,7 @@ export class Game {
   // score, debris, wave accounting and captive-drop can't drift apart between them
   killRoamer(r){
     r.alive = false;
-    this.addScore(CONFIG.scoring.perEnemyKilled); // +25 per alien killed — a ramming kill counts the same as a shot-down one
+    this.addScore(CONFIG.scoring.perRoamerKilled); // a ramming kill counts the same as a shot-down one
     this.spawnDebris(r.x, r.y, '#c98bff', CONFIG.debris.enemyKillCount, r.vx, r.vy); // doubled, per Mike's request for more debris when enemies are destroyed
     this.sound.play('roamerDeath', { x: r.x });
     this.waves.recordEnemyDestroyed();
@@ -159,10 +182,36 @@ export class Game {
 
   killBomber(bo){
     bo.alive = false;
-    this.addScore(CONFIG.scoring.perEnemyKilled);
+    this.addScore(CONFIG.scoring.perBomberKilled);
     this.spawnDebris(bo.x, bo.y, '#ff8a4d', CONFIG.debris.enemyKillCount, bo.vx, bo.vy);
     this.sound.play('bomberDeath', { x: bo.x });
     this.waves.recordEnemyDestroyed();
+  }
+
+  killKamikaze(k){
+    k.alive = false;
+    this.addScore(CONFIG.scoring.perKamikazeKilled);
+    this.spawnDebris(k.x, k.y, '#ff3b3b', CONFIG.debris.enemyKillCount, k.vx, k.vy);
+    this.sound.play('kamikazeDeath', { x: k.x });
+    this.waves.recordEnemyDestroyed();
+  }
+
+  // A kamikaze that touches ANY other enemy — another kamikaze, a roamer, or a bomber — detonates,
+  // taking both out in one much bigger blast than either dies with alone, per Mike's request
+  // (originally just kamikaze-vs-kamikaze, now any enemy — see CollisionSystem._kamikazesVsEnemies).
+  // otherScore is whichever per-type score `other` would normally be worth, so colliding with a
+  // roamer still pays out differently than colliding with a bomber or another kamikaze. Score/wave-
+  // stats-wise this still counts as two ordinary kills; only the explosion itself is scaled up.
+  explodeKamikazeWith(k, other, otherScore){
+    k.alive = false; other.alive = false;
+    const midX = wrapX(k.x + wrapDelta(k.x,other.x)/2), midY = (k.y+other.y)/2;
+    this.addScore(CONFIG.scoring.perKamikazeKilled + otherScore);
+    this.spawnDebris(midX, midY, '#ff3b3b', CONFIG.kamikaze.collisionDebrisCount);
+    this.sound.play('kamikazeCollision', { x: midX });
+    this.waves.recordEnemyDestroyed(2);
+    // a roamer caught mid-collision still drops whatever captive it was carrying, same as every
+    // other way a roamer can die — bombers and kamikazes simply don't have this field
+    if(other.carrying) this.spawnFallingCaptive(other.x, other.y);
   }
 
   nearestBuilding(x){
@@ -190,14 +239,14 @@ export class Game {
 
   // ---- carried items -------------------------------------------------------
 
-  // superbomb: destroys every enemy currently visible on screen — both roamers AND bombers, per
-  // Mike's request that superbombs destroy all enemy types (previously only roamers). Buildings are
-  // untouched. roamerCount/bomberCount are tracked separately because only roamers participate in
-  // the wave-clear system — bombers are a persistent, wave-independent threat, so a superbombed
-  // bomber shouldn't (and structurally can't, there's no per-wave bomber quota) count toward "this
-  // wave is cleared." Both kinds still contribute to the score bonus.
+  // superbomb: destroys every enemy currently visible on screen — roamers, bombers, AND kamikazes,
+  // per Mike's request that superbombs destroy all enemy types (previously only roamers). Buildings
+  // are untouched. roamerCount is tracked separately because only roamers participate in the
+  // wave-clear system — bombers and kamikazes are persistent, wave-independent threats, so a
+  // superbombed one shouldn't (and structurally can't, there's no per-wave quota for either) count
+  // toward "this wave is cleared." All three kinds still contribute to the score bonus.
   useSuperbomb(){
-    let roamerCount = 0, bomberCount = 0;
+    let roamerCount = 0, bomberCount = 0, kamikazeCount = 0;
     for(const r of this.roamers){
       if(!r.alive) continue;
       const sx = relX(this.camera.x, r.x);
@@ -217,16 +266,27 @@ export class Game {
         bomberCount++;
       }
     }
+    for(const k of this.kamikazes){
+      if(!k.alive) continue;
+      const sx = relX(this.camera.x, k.x);
+      if(sx > -20 && sx < W+20){
+        k.alive = false;
+        this.spawnDebris(k.x, k.y, '#ff3b3b', CONFIG.debris.enemyKillCount, k.vx, k.vy);
+        kamikazeCount++;
+      }
+    }
     this.roamers = this.roamers.filter(r=>r.alive);
     this.bombers = this.bombers.filter(bo=>bo.alive);
+    this.kamikazes = this.kamikazes.filter(k=>k.alive);
     // superbomb kills remove roamers from the array immediately (unlike a bullet kill, which just
     // flags alive=false and lets the next Roamer.updateAll pass count/filter it) — so this has to
     // credit the wave-resolved count itself, or a superbombed wave could never register as cleared.
-    // Bombers deliberately excluded — see above.
+    // Bombers and kamikazes deliberately excluded — see above.
     this.waves.recordResolved(roamerCount);
-    const count = roamerCount + bomberCount;
-    this.waves.recordEnemyDestroyed(count);
-    if(count>0) this.addScore(count*CONFIG.scoring.perEnemyKilled);
+    this.waves.recordEnemyDestroyed(roamerCount + bomberCount + kamikazeCount);
+    if(roamerCount>0) this.addScore(roamerCount*CONFIG.scoring.perRoamerKilled);
+    if(bomberCount>0) this.addScore(bomberCount*CONFIG.scoring.perBomberKilled);
+    if(kamikazeCount>0) this.addScore(kamikazeCount*CONFIG.scoring.perKamikazeKilled);
     this.superbombFlash = CONFIG.pickup.flashDuration;
     // deliberately ONE boom for the whole sweep, not one per enemy caught: the superbomb is a single
     // event, and a dozen overlapping death cracks on top of it would just be mud
@@ -296,11 +356,23 @@ export class Game {
     this.hud.setLives(this.lives);
     if(this.lives<=0){
       this.gameOver = true;
+      this.gameOverDisplayTimer = CONFIG.respawn.gameOverDisplayDelay;
+      // frozen here rather than read live off this.score at draw time: the world keeps simulating
+      // after GAME OVER (an already-in-flight bullet can still kill a roamer, say), which can nudge
+      // the score again after this exact value has already been saved to the board — reading it live
+      // both showed a "final" score that kept changing and broke the high-score row match below
+      // (Renderer.drawGameOver's lastIndexOf), since the live score no longer equalled anything on it.
+      this.finalScore = this.score;
       this.finalHighScores = this.highScores.save(this.score);
       // the drums bleed away rather than stopping dead, and every loop goes with the run
       this.sound.play('gameOver');
       this.sound.stopMusic(CONFIG.audio.music.gameOverFade);
       this.sound.stopAllLoops();
+      // per Mike's request: all audio stops until the game is restarted. The world keeps simulating
+      // after GAME OVER (bombs still land, roamers still die), which otherwise kept triggering fresh
+      // sounds and ambient loops right through the GAME OVER screen. Set after the sounds above, so
+      // the stinger and the music's fade-out are still heard rather than cut off mid-note.
+      this.sound.locked = true;
       if(this.mode==='flight'){ this._destroyShip(CONFIG.debris.shipFinalDeathCount); }
       else if(this.mode==='foot'){ this.spawnDebris(this.pilot.x, this.pilot.midY, '#ff8b5e', CONFIG.debris.footFinalDeathCount); this.pilot.hidden = true; }
       return;
@@ -342,6 +414,18 @@ export class Game {
     this.respawn = null;
   }
 
+  // ---- pause -----------------------------------------------------------
+
+  // P, mid-game. update() is simply skipped while paused (see start()), which freezes every timer,
+  // loop, and animation for free — nothing here needs its own pause-awareness. Audio is suspended
+  // right along with it so a paused game is a silent one, rather than the engine hum and drone loops
+  // droning on in real time while the world on screen sits frozen.
+  togglePause(){
+    this.paused = !this.paused;
+    if(this.paused) this.sound.pause();
+    else this.sound.resume();
+  }
+
   // ---- tick ----------------------------------------------------------------
 
   update(dt){
@@ -350,7 +434,7 @@ export class Game {
     // overlay, AND right through the final death into GAME OVER too. Only the player's own input
     // handling is ever suspended (nothing to control — they're hidden/destroyed) until the next life
     // actually starts, or forever once the game is over.
-    if(this.gameOver){ /* no input handling — everything below still runs */ }
+    if(this.gameOver){ if(this.gameOverDisplayTimer > 0) this.gameOverDisplayTimer -= dt; }
     else if(this.respawn){ if(this.respawn.update(dt)) this.finishRespawn(); }
     else if(this.mode === 'foot') this.pilot.update(dt, this);
     else if(this.mode === 'interior') this.interior.update(dt, this);
@@ -358,6 +442,7 @@ export class Game {
 
     this.roamers = Roamer.updateAll(this.roamers, dt, this);
     this.bombers = Bomber.updateAll(this.bombers, dt, this);
+    this.kamikazes = Kamikaze.updateAll(this.kamikazes, dt, this);
     Humanoid.updateAll(this.humanoids, dt, this);
     this.waves.updateTransition(dt);
     this.bombs = Bomb.updateAll(this.bombs, dt, this);
@@ -390,6 +475,7 @@ export class Game {
     // the pressure in front of you, and something two screens away shouldn't be adding to it
     this.sound.loopWhile('roamerDrone', true, { count: this._onScreenCount(this.roamers) });
     this.sound.loopWhile('bomberDrone', true, { count: this._onScreenCount(this.bombers) });
+    this.sound.loopWhile('kamikazeDrone', true, { count: this._onScreenCount(this.kamikazes) });
   }
 
   _onScreenCount(list){
@@ -426,7 +512,9 @@ export class Game {
       // run `simSpeed` logic ticks per rendered frame, so testing at 2x/4x/8x compresses real time
       // uniformly across dt-scaled physics AND frame-based bullet motion, rather than just scaling dt
       // (which would speed up movement but leave bullets — a fixed distance per tick — unchanged).
-      for(let i=0;i<this.input.simSpeed;i++) this.update(dt);
+      // Paused, none of that runs at all — `last` still advances above so unpausing doesn't see a
+      // giant dt for the frame spent sitting still.
+      if(!this.paused) for(let i=0;i<this.input.simSpeed;i++) this.update(dt);
       this.draw();
       requestAnimationFrame(frame);
     };

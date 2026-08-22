@@ -1,15 +1,16 @@
-import { CONFIG, W } from '../config.js';
+import { CONFIG, W, WORLD_W } from '../config.js';
 import { relX, wrapX, wrapDelta } from '../core/geometry.js';
 import { EnemyBullet } from './Bullet.js';
 
 // Roamers hunt humanoids — bombing raids are the bombers' job (see Bomber), not the roamers'.
 export class Roamer {
   // spawn off the top of the screen (not already hovering mid-air) and descend into hunting
-  // altitude. Biased near the current camera so the descent is actually visible reasonably often,
-  // not buried deep in unseen world space.
+  // altitude. Anywhere along the world's horizontal axis, per Mike's request — not just near the
+  // camera, which used to mean every roamer's descent happened somewhere the player was already
+  // looking.
   static spawn(game){
     const r = new Roamer(
-      wrapX(game.camera.x + (Math.random()<0.5?-1:1) * (CONFIG.roamer.spawnDistMin+Math.random()*CONFIG.roamer.spawnDistRandRange)),
+      wrapX(Math.random()*WORLD_W),
       CONFIG.roamer.spawnYBase - Math.random()*CONFIG.roamer.spawnYRandRange
     );
     game.roamers.push(r);
