@@ -1,4 +1,4 @@
-import { CONFIG, GROUND_Y, W, MIN_FLIGHT_ALT_Y } from '../config.js';
+import { CONFIG, GROUND_Y, W } from '../config.js';
 import { relX, wrapDelta } from '../core/geometry.js';
 import { Humanoid } from './Humanoid.js';
 
@@ -51,16 +51,16 @@ export class FallingCaptive {
   _ride(game, carrying){
     const ship = game.ship;
     this.x = ship.x; this.y = ship.y + 14;
-    // the ship "drops off" a carried captive once it's down at its lowest flyable point —
-    // MIN_FLIGHT_ALT_Y is the same floor the flight-altitude clamp in Ship enforces, so this
-    // reliably fires whenever the ship is hovering as low as it can go while still flying (mode
-    // stays 'flight' right up until an actual landing transition happens).
-    if(game.mode==='flight' && ship.alive && ship.y >= MIN_FLIGHT_ALT_Y - 1){
-      // dropped off wherever the ship happens to be — on a rooftop if it's low and close enough to
-      // one, on the ground otherwise, per Mike's request that rescues can end on a rooftop and not
-      // just at street level
+    // The ship "drops off" a carried captive once its altitude is close to whatever landable surface
+    // is directly below/at it right now — landingSurfaceAt already finds the ground OR a rooftop
+    // (whichever is closest to the ship's CURRENT y, at that x), same as the ship's own landing check
+    // uses, so this works over ANY rooftop rather than only ones whose height happened to coincide
+    // with the ship's minimum flight altitude. Deliberately no speed check (unlike actual landing),
+    // per Mike's request that a drop-off work at any speed.
+    if(game.mode==='flight' && ship.alive){
       const surf = game.landingSurfaceAt(ship.x, ship.y);
-      const onRoof = surf.roofRef && Math.abs(ship.y - (surf.topY - 8)) < CONFIG.captive.rooftopDropTol;
+      if(surf.dist >= CONFIG.captive.dropDist) return carrying;
+      const onRoof = !!surf.roofRef;
       const h = new Humanoid(this.x);
       if(onRoof){ h.roofRef = surf.roofRef; h.roofSettleTimer = CONFIG.captive.roofSettleMin + Math.random()*CONFIG.captive.roofSettleRandRange; }
       // three quick blinks instead of a debris burst when a captive is safely returned, per Mike's

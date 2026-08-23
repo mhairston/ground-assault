@@ -121,13 +121,14 @@ export const CONFIG = {
   humanoid: {
     height: 20,
     count: 10,
-    growthPerWave: 3,
+    growthPerWave: 1,
     fleeSpeed: 35,
     fleeTriggerDist: 100,
-    wanderSpeed: 30,
+    wanderSpeed: 25,
     climbSpeed: 40,
     doorReachDist: 4,
     animSpeed: 15,
+    climbAnimSpeed: 11, // hand-over-hand ladder cycle, per Mike's request — same pacing as the pilot's
     wanderTimerMin: 3, wanderTimerRandRange: 3,
     // NB: the blink-on-rescue duration and the rooftop settle timer live on `captive` — they only
     // ever apply to a humanoid that has just been dropped or rescued, and that code reads them from
@@ -163,8 +164,11 @@ export const CONFIG = {
     tiltEaseRate: 8, // how fast the drawn tilt eases toward its target each second, per Mike's
                       // request that the tilt transition be animated rather than an instant snap —
                       // see Roamer.easeTilts and Roamer.draw
-    respawnTimerBase: 5, respawnTimerRandRange: 4,
-    initialRespawnTimer: 4,
+    // halved (was 5, 4 — and initialRespawnTimer was 4), per Mike's request to deliver a wave's
+    // roamers faster: they still spawn anywhere on the map, but with more of them airborne at once,
+    // the odds of one actually landing near wherever the player is go up a lot sooner
+    respawnTimerBase: 4, respawnTimerRandRange: 2.5,
+    initialRespawnTimer: 2,
     maxAlive: 32,
     spawnYBase: -20, spawnYRandRange: 80,
     descendTargetYBase: 200, descendTargetYRandRange: 120,
@@ -183,7 +187,11 @@ export const CONFIG = {
     quotaPerWave: 5,
     quotaCap: 45,
     releaseRateCap: 3,
-    releaseRateDivisor: 3,
+    releaseRateDivisor: 6,
+    // was 1 (hardcoded in the formula) — doubled, per Mike's request that more roamers be in the air
+    // at once from wave 1 on, so a spawn landing near the player happens sooner even with the
+    // "anywhere on the map" spawn placement. See WaveManager.releaseRateFor.
+    releaseRateBase: 2,
     completeBonus: 500,
     completeOverlayDuration: 3.0,
   },
@@ -194,6 +202,7 @@ export const CONFIG = {
     // Ship/Kamikaze, whose draw() already derives its shape from w/h
     w: 28, h: 12,
     maxAlive: 3,
+    minWave: 5, // doesn't start appearing until wave 5, per Mike's request
     hp: 2, // per Mike's request — a bomber survives one hit (bullet or ram) and goes down on the second
     initialRespawnTimer: 6,
     respawnTimerBase: 8, respawnTimerRandRange: 6,
@@ -218,6 +227,7 @@ export const CONFIG = {
     w: 22, h: 14,
     hp: 1, // one hit and it's down — dangerous up close, fragile at range
     maxAlive: 2,
+    minWave: 3, // doesn't start appearing until wave 3, per Mike's request
     initialRespawnTimer: 10,
     respawnTimerBase: 14, respawnTimerRandRange: 10,
     spawnYBase: -20, spawnYRandRange: 80,
@@ -228,10 +238,14 @@ export const CONFIG = {
     baseChaseSpeed: 110, chaseSpeedPerWave: 6, maxChaseSpeed: 220,
     turnEaseRate: 8, // how fast its drawn heading eases toward its actual direction of travel
     bulletTolX: 12, bulletTolY: 8,
-    // if two kamikazes touch each other (rather than the ship), they take each other out in one much
-    // bigger blast than either dies with alone, per Mike's request — see Game.explodeKamikazePair.
+    // if a kamikaze touches any other enemy (rather than the ship), they take each other out in one
+    // much bigger blast than either dies with alone, per Mike's request — see Game.explodeKamikazeWith.
     // Well above enemyKillCount (16) and in the same league as a building collapsing (64).
     collisionDebrisCount: 60,
+    // how long that blast lingers, per Mike's request — both the debris (see Game.explodeKamikazeWith,
+    // which passes this as the fragments' fixed life) and the kamikazeCollision sound itself (see
+    // voices.js, which reads this directly) are driven off this one value, so they stay in sync
+    collisionExplosionDuration: 3,
   },
   bomb: {
     fallSpeed: 130,
@@ -257,7 +271,12 @@ export const CONFIG = {
     fallGravity: 120,
     catchTolX: 20, catchTolY: 20,
     surviveStoryHeight: 25, surviveStories: 2,
-    rooftopDropTol: 40,
+    // how close the ship's altitude has to be to a landable surface's own height to drop a rescued
+    // captive off there, per Mike's request that this work over ANY rooftop (not just ones whose
+    // height happened to match the ship's minimum flight altitude) and at any speed — see
+    // FallingCaptive._ride, which reads this the same way Game.landingSurfaceAt's dist already does
+    // for the ship's own landing, just without that check's speed requirement
+    dropDist: 40,
     roofSettleMin: 2, roofSettleRandRange: 2,
     debrisOnLost: 6,
     scoreOnRescue: 50,
@@ -271,7 +290,7 @@ export const CONFIG = {
     cullMargin: 200,
     maxRange: 700, // player bullets fizzle out after traveling this far, per Mike's request — see
                     // PlayerBullet, which tracks accumulated distance per bullet.
-    enemyMaxRange: 900, // roamer gunfire fizzles out after traveling this far, per Mike's request —
+    enemyMaxRange: 500, // roamer gunfire fizzles out after traveling this far, per Mike's request —
                         // same accumulated-distance approach as player bullets, just a separate, longer
                         // range and a separate CONFIG field since the two aren't meant to always match.
   },
@@ -350,26 +369,26 @@ export const CONFIG = {
     // sub-buses, so the mix can be balanced by category rather than sound by sound. Ambient loops
     // (engine hum, enemy drones) sit far lower than one-shots on purpose — in isolation they sound
     // too quiet, and in the mix they are still the first thing to muddy everything else.
-    sfxVolume: 0.95, ambientVolume: 0.3, musicVolume: 0.35, uiVolume: 0.75,
+    sfxVolume: 0.95, ambientVolume: 0.3, musicVolume: 0.15, uiVolume: 0.75,
     startMuted: false,
     // Panning is screen-relative rather than world-relative (the plan's open question): an object at
     // the edge of the viewport is panned fully to that side, which is far more dramatic than scaling
     // pan across the whole 4800px world, where everything audible would sit near centre.
     panStrength: 0.85,   // 1 = hard left/right at the screen edges; less keeps some centre presence
-    audibleMargin: 320,  // px beyond the screen edge a sound can still be heard at all
+    audibleMargin: 120,  // px beyond the screen edge a sound can still be heard at all
     edgeVolume: 0.01,    // how loud a sound is at that outer limit — it fades to this, never cuts off
     maxVoicesPerSound: 4, // concurrency cap per sound id, so a burst of them can't stack into clipping
     engine: {
-      baseHz: 42, speedHz: 5,  // hum pitch = baseHz + speedHz * (speed/maxSpeed)
-      volume: 0.15,              // relative to the ambient bus
-      thrustNoiseVolume: 0.2,  // the noise puff layered under the hum while thrust keys are held
-      glideVolume: 0.2,         // hum drops to this during an auto takeoff/landing glide
+      baseHz: 32, speedHz: 7,  // hum pitch = baseHz + speedHz * (speed/maxSpeed)
+      volume: 0.08,              // relative to the ambient bus
+      thrustNoiseVolume: 0.07,  // the noise puff layered under the hum while thrust keys are held
+      glideVolume: 0.001,         // hum drops to this during an auto takeoff/landing glide
     },
-    roamerDrone: { baseHz: 128, volume: 0.31, perRoamer: 0.05, lfoHz: 1.0, lfoPerRoamer: 0.18 },
-    bomberDrone: { baseHz: 64, volume: 0.23, perBomber: 0.05, wobbleHz: 1.8, wobbleCents: 22 },
+    roamerDrone: { baseHz: 128, volume: 0.04, perRoamer: 0.05, lfoHz: 1.0, lfoPerRoamer: 0.18 },
+    bomberDrone: { baseHz: 64, volume: 0.05, perBomber: 0.05, wobbleHz: 1.8, wobbleCents: 22 },
     // higher and faster-pulsing than the other two, so a kamikaze's presence reads as more urgent
-    kamikazeDrone: { baseHz: 200, volume: 0.22, perKamikaze: 0.06, lfoHz: 2.6, lfoPerKamikaze: 0.3 },
-    bombWhistle: { fromHz: 1250, toHz: 400, volume: 0.1 },
+    kamikazeDrone: { baseHz: 200, volume: 0.09, perKamikaze: 0.06, lfoHz: 2.6, lfoPerKamikaze: 0.3 },
+    bombWhistle: { fromHz: 1250, toHz: 400, volume: 0.12 },
     // rate limits for sounds that would otherwise fire many times a second
     footstepGap: 0.26, climbTickGap: 0.22, civilianYelpGap: 1.0,
     music: {
@@ -384,6 +403,11 @@ export const CONFIG = {
       hatClosed:'XXX.X.XXXX.XX.XX',
       hatOpen:  '.....X....X.....',
       kickVolume: 0.9, snareVolume: 0.7, hatClosedVolume: 0.22, hatOpenVolume: 0.2,
+      // kick and snare only play while the ship is actually moving, per Mike's request — the hats
+      // keep ticking regardless, so the beat never goes fully silent, just loses its punch when
+      // parked. A small speed floor rather than a plain >0 check, so drifting to a stop doesn't
+      // flicker the kit on/off across single-pixel-per-frame speeds. See DrumMachine.setShipMoving.
+      shipMotionThreshold: 5,
       // the standard Web Audio clock: schedule this far ahead, waking this often, so the beat stays
       // tight even when the JS event loop is busy with a frame
       lookahead: 0.1, tickInterval: 0.025,

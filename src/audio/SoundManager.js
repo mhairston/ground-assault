@@ -166,6 +166,7 @@ export class SoundManager {
   stopMusic(fade = 0){ this.music?.stop(fade); }
   duckMusic(seconds){ this.music?.duck(seconds); }
   setMusicWave(wave){ this.music?.setWave(wave); }
+  setMusicShipMoving(moving){ this.music?.setShipMoving(moving); }
 
   // ---- internals -------------------------------------------------------------------------------
   // Where a world x sits in the stereo field, and how loud. Panning is screen-relative: an object at

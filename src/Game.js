@@ -49,9 +49,13 @@ export class Game {
     this.sound = new SoundManager(this.camera);
 
     this.input = new Input(doc.getElementById('speedSelect'), {
-      onBoardOrLand: () => this.tryBoardOrLand(),
-      // P restarts the game once it's over; any other time it's underway, it pauses/unpauses instead
+      // no-ops during the title screen — nothing but P does anything until the game has started
+      onBoardOrLand: () => { if(!this.titleScreen) this.tryBoardOrLand(); },
+      // P is the one key that drives every top-level state transition, per Mike's request: starts
+      // the game from the title screen, restarts after GAME OVER, and pauses/unpauses any other time
+      // it's underway. Checked in that order since they're mutually exclusive game states.
       onP: () => {
+        if(this.titleScreen){ this.titleScreen = false; return; }
         // unlock before playing the restart cue — sound.locked is still true here, set at GAME OVER
         // (see loseLife), and reset() itself clears it defensively but only runs afterward
         if(this.gameOver){ this.sound.locked = false; this.sound.play('restart'); this.reset(); }
@@ -67,7 +71,7 @@ export class Game {
         this.sound.unlock();
         if(fresh && !this.gameOver) this.sound.startMusic();
       },
-      onMute: () => this.hud.setAudio(this.sound.toggleMute()),
+      onMute: () => { if(!this.titleScreen) this.hud.setAudio(this.sound.toggleMute()); },
     });
 
     // Switching tabs/apps auto-pauses, per Mike's request — otherwise the whole world (roamers,
@@ -75,10 +79,16 @@ export class Game {
     // NOT auto-resume on return: that stays an explicit P, so nothing lurches back into motion the
     // instant focus comes back.
     doc.addEventListener('visibilitychange', () => {
-      if(doc.hidden && !this.gameOver && !this.paused) this.togglePause();
+      if(doc.hidden && !this.gameOver && !this.paused && !this.titleScreen) this.togglePause();
     });
 
     this.reset();
+    // Set once, after the initial reset() above — not touched by reset() itself, so restarting after
+    // GAME OVER (which also calls reset()) goes straight back into gameplay rather than re-showing
+    // this. update() no-ops entirely while this is true (see update()), so the world just sits at
+    // reset()'s initial state — ship parked/flying, buildings up, humanoids scattered — as a static
+    // backdrop until P dismisses it (see onP above).
+    this.titleScreen = true;
   }
 
   // Full game setup, used both at load and for the in-place restart on P, per Mike's request —
@@ -110,6 +120,7 @@ export class Game {
     this.paused = false;
     this.finalHighScores = null;
     this.finalScore = null;
+    this.finalWaveNumber = null; // which wave was active at death — see loseLife and Renderer.drawGameOver
     this.hud.setScore(this.score);
     this.hud.setLives(this.lives);
 
@@ -139,6 +150,9 @@ export class Game {
 
     this.waves.reset();
     this.waves.releaseRoamers();
+    // painted once here rather than left to the first update() tick, so the HUD reads correctly (mode,
+    // carried items) immediately — including during the title screen, when update() never runs at all
+    this.updateHud();
   }
 
   // ---- shared choke points -------------------------------------------------
@@ -152,9 +166,11 @@ export class Game {
 
   // srcVx/srcVy: the velocity of whatever was destroyed, which its fragments fly away carrying a
   // share of (see Fragment). Omitted by everything that blows up from a standstill — building hits,
-  // bomb impacts, ground explosions.
+  // bomb impacts, ground explosions. life: an explicit fixed fragment lifetime overriding the usual
+  // random roll, for an explosion that needs to visibly linger (see Game.explodeKamikazeWith) —
+  // omitted everywhere else.
   // returns when this explosion will be over (see DebrisField.spawn) — ignored by most callers
-  spawnDebris(x, y, color, count, srcVx = 0, srcVy = 0){ return this.debris.spawn(x, y, color, count, srcVx, srcVy); }
+  spawnDebris(x, y, color, count, srcVx = 0, srcVy = 0, life = null){ return this.debris.spawn(x, y, color, count, srcVx, srcVy, life); }
 
   spawnFallingCaptive(x, y){ this.fallingCaptives.push(new FallingCaptive(x, y)); }
 
@@ -206,12 +222,41 @@ export class Game {
     k.alive = false; other.alive = false;
     const midX = wrapX(k.x + wrapDelta(k.x,other.x)/2), midY = (k.y+other.y)/2;
     this.addScore(CONFIG.scoring.perKamikazeKilled + otherScore);
-    this.spawnDebris(midX, midY, '#ff3b3b', CONFIG.kamikaze.collisionDebrisCount);
+    // lingers for collisionExplosionDuration (3s), per Mike's request — well past the usual ~0.5-0.9s
+    // debris life — and the kamikazeCollision sound itself is tuned to the same length (see voices.js)
+    this.spawnDebris(midX, midY, '#ff3b3b', CONFIG.kamikaze.collisionDebrisCount, 0, 0, CONFIG.kamikaze.collisionExplosionDuration);
     this.sound.play('kamikazeCollision', { x: midX });
     this.waves.recordEnemyDestroyed(2);
     // a roamer caught mid-collision still drops whatever captive it was carrying, same as every
     // other way a roamer can die — bombers and kamikazes simply don't have this field
     if(other.carrying) this.spawnFallingCaptive(other.x, other.y);
+  }
+
+  // A kamikaze that touches a building destroys it immediately, per Mike's request, regardless of
+  // remaining HP — and the kamikaze goes with it, the same big-blast treatment as hitting any other
+  // enemy (see CollisionSystem._kamikazesVsBuildings). Building.collapse already handles the
+  // building's own score penalty, debris, and any humans caught in it; this just adds the kamikaze's
+  // own destruction (and its own score credit) on top.
+  explodeKamikazeIntoBuilding(k, bld){
+    k.alive = false;
+    this.addScore(CONFIG.scoring.perKamikazeKilled);
+    this.spawnDebris(k.x, k.y, '#ff3b3b', CONFIG.kamikaze.collisionDebrisCount, k.vx, k.vy, CONFIG.kamikaze.collisionExplosionDuration);
+    this.sound.play('kamikazeCollision', { x: k.x });
+    this.waves.recordEnemyDestroyed();
+    bld.collapse(this);
+  }
+
+  // A kamikaze that reaches the on-foot pilot kills them and destroys itself, per Mike's request —
+  // the same big blast as any other kamikaze collision, just against the player instead of another
+  // enemy (see CollisionSystem._kamikazesVsPilot). loseLife handles the actual death/respawn
+  // sequencing; the kamikaze still pays out its usual score, same as a ship ramming one does.
+  explodeKamikazeIntoPilot(k){
+    k.alive = false;
+    this.addScore(CONFIG.scoring.perKamikazeKilled);
+    this.spawnDebris(k.x, k.y, '#ff3b3b', CONFIG.kamikaze.collisionDebrisCount, k.vx, k.vy, CONFIG.kamikaze.collisionExplosionDuration);
+    this.sound.play('kamikazeCollision', { x: k.x });
+    this.waves.recordEnemyDestroyed();
+    this.loseLife();
   }
 
   nearestBuilding(x){
@@ -363,6 +408,9 @@ export class Game {
       // both showed a "final" score that kept changing and broke the high-score row match below
       // (Renderer.drawGameOver's lastIndexOf), since the live score no longer equalled anything on it.
       this.finalScore = this.score;
+      // same freezing reasoning as finalScore above — the wave can still advance for a moment after
+      // GAME OVER (the world keeps simulating), so this is captured once here rather than read live
+      this.finalWaveNumber = this.waves.number;
       this.finalHighScores = this.highScores.save(this.score);
       // the drums bleed away rather than stopping dead, and every loop goes with the run
       this.sound.play('gameOver');
@@ -429,6 +477,9 @@ export class Game {
   // ---- tick ----------------------------------------------------------------
 
   update(dt){
+    // nothing runs at all until the title screen is dismissed (see onP) — the world just sits at
+    // whatever reset() left it, per Mike's request for a "press P to start" title screen
+    if(this.titleScreen) return;
     // the world doesn't pause just because the player did — roamers keep hunting/departing, bombs
     // keep falling, pickups keep spawning, right through the death explosion and "SHIP LOST"
     // overlay, AND right through the final death into GAME OVER too. Only the player's own input
@@ -476,6 +527,10 @@ export class Game {
     this.sound.loopWhile('roamerDrone', true, { count: this._onScreenCount(this.roamers) });
     this.sound.loopWhile('bomberDrone', true, { count: this._onScreenCount(this.bombers) });
     this.sound.loopWhile('kamikazeDrone', true, { count: this._onScreenCount(this.kamikazes) });
+    // kick/snare only play while the ship is actually moving, per Mike's request — see
+    // DrumMachine.setShipMoving. this.ship.speed is always 0 while parked/on foot, so this needs no
+    // extra mode check of its own.
+    this.sound.setMusicShipMoving(this.ship.speed > CONFIG.audio.music.shipMotionThreshold);
   }
 
   _onScreenCount(list){

@@ -64,6 +64,22 @@ export class Renderer {
     this.drawShipLost(ctx, game);
     this.drawWaveComplete(ctx, game);
     this.drawPaused(ctx, game);
+    this.drawTitleScreen(ctx, game);
+  }
+
+  // Shown until P is pressed, per Mike's request — the world sits at its just-reset() state
+  // underneath (ship parked/flying, buildings up, humanoids scattered) as a static backdrop, same
+  // "dim overlay + big text" treatment as PAUSED. Never shown again after a P-restart post-GAME OVER,
+  // since Game only sets titleScreen once, at construction — see Game's constructor comment.
+  drawTitleScreen(ctx, game){
+    if(!game.titleScreen) return;
+    ctx.fillStyle = 'rgba(5,8,16,0.6)'; ctx.fillRect(0,0,W,H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#8ff0ff'; ctx.font = 'bold 32px monospace';
+    ctx.fillText('GROUND ASSAULT', W/2, H/2-20);
+    ctx.fillStyle = '#eaffff'; ctx.font = 'bold 16px monospace';
+    ctx.fillText('PRESS P TO START', W/2, H/2+20);
+    ctx.textAlign = 'left';
   }
 
   drawPaused(ctx, game){
@@ -122,7 +138,11 @@ export class Renderer {
     lines.push({ text:'GAME OVER', font:'bold 28px monospace', color:'#ff5e7a', y });
     y += 28;
     lines.push({ text:'FINAL SCORE: ' + game.finalScore, font:'15px monospace', color:'#eaffff', y });
-    y += 24;
+    y += 20;
+    // which wave was active at death, per Mike's request — frozen the same way finalScore is (see
+    // loseLife), since the world can still advance a wave for a moment after GAME OVER
+    lines.push({ text:'WAVE REACHED: ' + WaveManager.word(game.finalWaveNumber), font:'14px monospace', color:'#8ff0ff', y });
+    y += 22;
     // same stats block as the WAVE COMPLETE overlay, per Mike's request — but run-wide (see
     // WaveManager.finalStats) rather than just whatever the in-progress wave happened to hold
     const stats = game.waves.finalStats;
@@ -141,9 +161,8 @@ export class Renderer {
       lines.push({ text:(i+1)+'. '+list[i], font:'13px monospace', color:'#cfe8ff', y, highlighted: i===newRow });
       y += 16;
     }
-    // kept verbatim from the original — note it predates the P-to-restart key (see the legend under
-    // the canvas), so it's arguably stale copy rather than a description of the only way out
-    lines.push({ text:'refresh to retry', font:'12px monospace', color:'#7a95b0', y: y+16 });
+    // P, not "refresh" — per Mike's request, P is the one key for starting/pausing/restarting
+    lines.push({ text:'press P to play again', font:'12px monospace', color:'#7a95b0', y: y+16 });
 
     // backing panel, per Mike's request, so the text stays readable over whatever's happening in the
     // world behind it — sized to the actual content (widest line, top/bottom extent) rather than a

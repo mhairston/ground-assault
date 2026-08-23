@@ -35,11 +35,11 @@ export class Input {
     this.keys[e.code] = true;
     if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
     if(['Digit1','Digit2','Digit3','Digit4'].includes(e.code)) this.setSimSpeed(this.speeds[Number(e.code.slice(-1))-1]);
-    // P restarts the game once it's over, and pauses/unpauses it any other time it's underway, per
-    // Mike's request — Game itself decides which, since Input doesn't know game state. !e.repeat is
-    // essential here (unlike the old restart-only behavior, which was idempotent under repeats): P
-    // now toggles a boolean, so holding it down would otherwise flip paused/unpaused several times a
-    // second and appear to do nothing by the time the key is released.
+    // P is the one key that starts the game, restarts it after GAME OVER, and pauses/unpauses it any
+    // other time it's underway, per Mike's request — Game itself decides which, since Input doesn't
+    // know game state. !e.repeat is essential here: P toggles a boolean (pause) among other things,
+    // so holding it down would otherwise flip state several times a second and appear to do nothing
+    // by the time the key is released.
     if(e.code === 'KeyP' && !e.repeat) this.onP();
     // A boards/lands, per Mike's request (round 19, reverting rounds 16-18's fully-automatic version).
     // !e.repeat filters out the OS's key-auto-repeat events that fire while a key is held down, so this

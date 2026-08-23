@@ -24,6 +24,7 @@ export class Humanoid {
     this.wanderDir = 1;
     this.wanderTimer = 0;
     this.roofRef = null;
+    this.headingToLadder = false; // walking toward the roof's ladder before starting to climb down — see update()
     this.climbing = false;
     this.climbY = 0;
     this.roofSettleTimer = 0;
@@ -68,9 +69,11 @@ export class Humanoid {
 
     // a civilian mid-climb-down (see the roofSettleTimer logic just below) just keeps descending —
     // no fleeing/wandering/hunting-response while on the ladder, same as the player can't do anything
-    // else mid-climb either. Not "moving" in the running-animation sense — climbing has its own pose.
+    // else mid-climb either. Not "moving" in the running-animation sense — climbing has its own pose
+    // (see draw/_drawClimbing), driven by its own animPhase advance rather than the run cycle's.
     if(this.climbing){
       this.moving = false;
+      this.animPhase += dt*CONFIG.humanoid.climbAnimSpeed;
       this.climbY += CLIMB_SPEED*dt;
       const groundStand = GROUND_Y - HUMANOID_H;
       if(this.climbY >= groundStand){ this.climbY = groundStand; this.climbing = false; this.roofRef = null; }
@@ -78,19 +81,37 @@ export class Humanoid {
     }
 
     // a civilian the ship dropped off on a rooftop (see FallingCaptive): they can walk around up
-    // there and, after a short settle delay, will climb back down on their own — but only if that
-    // building actually has a ladder (slanted-roof houses don't, see Building). No ladder just means
-    // they're stuck up there for now, same as the player would be. They're still a valid roamer
-    // target the whole time (see Roamer's capture-altitude logic, which reads their real position via
-    // topY) — just can't proactively flee since there's nowhere to run to.
+    // there and, after a short settle delay, will head for the roof's ladder and climb back down on
+    // their own — but only if that building actually has a ladder (slanted-roof houses don't, see
+    // Building). No ladder just means they're stuck up there for now, same as the player would be.
+    // They're still a valid roamer target the whole time (see Roamer's capture-altitude logic, which
+    // reads their real position via topY) — just can't proactively flee since there's nowhere to run to.
     if(this.roofRef){
-      if(this.roofRef.destroyed){ this.roofRef = null; return; }
+      if(this.roofRef.destroyed){ this.roofRef = null; this.headingToLadder = false; return; }
       if(this.roofSettleTimer > 0){
         this.roofSettleTimer -= dt;
-        if(this.roofSettleTimer <= 0 && this.roofRef.hasLadder){
+        if(this.roofSettleTimer <= 0 && this.roofRef.hasLadder) this.headingToLadder = true;
+      }
+      if(this.headingToLadder){
+        // runs to the ladder's actual x before climbing down, per Mike's request, rather than
+        // starting to climb from wherever they happened to be dropped — same rooftop-footprint clamp
+        // `wandering` below uses, just aimed at a fixed target (FLEE_SPEED, since this reads as
+        // hurrying somewhere specific rather than idly wandering)
+        this.moving = true;
+        this.animPhase += dt*CONFIG.humanoid.animSpeed;
+        const margin = CONFIG.pilot.rooftopClampMargin;
+        const dx = wrapDelta(this.x, this.roofRef.ladderX);
+        const proposed = wrapX(this.x + Math.sign(dx)*Math.min(Math.abs(dx), FLEE_SPEED*dt));
+        let d = wrapDelta(this.roofRef.x, proposed);
+        d = Math.max(-(this.roofRef.width/2-margin), Math.min(this.roofRef.width/2-margin, d));
+        this.x = wrapX(this.roofRef.x + d);
+        if(Math.abs(wrapDelta(this.x, this.roofRef.ladderX)) < 2){
+          this.x = this.roofRef.ladderX; // centered on the ladder, same treatment the player gets
+          this.headingToLadder = false;
           this.climbing = true;
           this.climbY = (GROUND_Y - this.roofRef.height) - HUMANOID_H;
         }
+        return;
       }
       this.moving = this.wandering;
       if(this.wandering){
@@ -157,6 +178,7 @@ export class Humanoid {
     // safe (reached a building door and can no longer be abducted) reads as a calmer green instead of
     // the normal at-risk yellow — a quick visual confirmation of who's sheltered
     const color = this.safe ? '#8fffb0' : '#ffd76b';
+    if(this.climbing){ this._drawClimbing(ctx, sx, topY, color); return; }
     // same running-cycle treatment as the pilot (see Pilot.draw), and the same overall height
     // (HUMANOID_H, matching the pilot's h) — both per Mike's request
     const bodyH = 12, legH = HUMANOID_H - bodyH;
@@ -168,5 +190,21 @@ export class Humanoid {
     ctx.fillRect(sx  -swing*0.6, topY+bodyH-bob, 3, legH);
     ctx.fillStyle = '#fff3c9';
     ctx.fillRect(sx-3, topY-4-bob, 6, 6);
+  }
+
+  // Climbing gets its own pose, per Mike's request — face-on against the ladder with arms reaching
+  // for rungs and legs stepping opposite them, the same treatment Pilot._drawClimbing already gets,
+  // rather than the running cycle playing out in place.
+  _drawClimbing(ctx, sx, topY, color){
+    const bodyH = 12, legH = HUMANOID_H - bodyH;
+    const reach = Math.sin(this.animPhase);
+    ctx.fillStyle = color;
+    ctx.fillRect(sx-4, topY, 8, bodyH);
+    ctx.fillRect(sx-3, topY+bodyH+reach*2, 3, legH-Math.abs(reach));
+    ctx.fillRect(sx,   topY+bodyH-reach*2, 3, legH-Math.abs(reach));
+    ctx.fillRect(sx-6, topY-2-reach*3, 2, 7);
+    ctx.fillRect(sx+4, topY-2+reach*3, 2, 7);
+    ctx.fillStyle = '#fff3c9';
+    ctx.fillRect(sx-3, topY-4, 6, 6);
   }
 }

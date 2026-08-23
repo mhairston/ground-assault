@@ -2,10 +2,10 @@ import { CONFIG, W, WORLD_W } from '../config.js';
 import { relX, wrapX, wrapDelta } from '../core/geometry.js';
 
 // A new, wave-independent persistent threat, per Mike's request — same footing as Bomber (no
-// per-wave quota, just a steady trickle). Idles/patrols until the player's ship comes within
-// triggerRange, then commits fully to closing the distance and ramming it. Its closing speed climbs
-// slowly wave over wave (see _chaseSpeed), so the same trigger range gets more dangerous to ignore
-// the deeper into a run you are.
+// per-wave quota, just a steady trickle). Idles/patrols until whatever the player currently is —
+// the ship in flight, or the pilot on foot — comes within triggerRange, then commits fully to
+// closing the distance and ramming it. Its closing speed climbs slowly wave over wave (see
+// _chaseSpeed), so the same trigger range gets more dangerous to ignore the deeper into a run you are.
 export class Kamikaze {
   // spawn off the top of the screen, anywhere along the world's horizontal axis — same treatment
   // Roamer spawning got, so it isn't only ever seen wherever the camera happens to be
@@ -35,7 +35,10 @@ export class Kamikaze {
   // restart resets it along with everything else
   static updateAll(kamikazes, dt, game){
     game.kamikazeRespawn -= dt;
-    if(game.kamikazeRespawn <= 0 && kamikazes.filter(k=>k.alive).length < CONFIG.kamikaze.maxAlive){
+    // don't start appearing until minWave, per Mike's request — the timer still counts down underneath
+    // regardless, so one can appear right away once that wave actually starts rather than needing a
+    // full fresh cycle first
+    if(game.waves.number >= CONFIG.kamikaze.minWave && game.kamikazeRespawn <= 0 && kamikazes.filter(k=>k.alive).length < CONFIG.kamikaze.maxAlive){
       Kamikaze.spawn(game);
       game.kamikazeRespawn = CONFIG.kamikaze.respawnTimerBase + Math.random()*CONFIG.kamikaze.respawnTimerRandRange;
     }
@@ -57,15 +60,27 @@ export class Kamikaze {
   update(dt, game){
     this.phase += dt;
     const prevX = this.x, prevY = this.y;
-    const ship = game.ship;
 
-    // true radial distance to the ship, per Mike's request ("within 300px") — only the flown ship
-    // counts as a target; a kamikaze has nothing to chase while the player is on foot or destroyed
-    const dx = ship.alive ? wrapDelta(this.x, ship.x) : 0;
-    const dy = ship.alive ? ship.y - this.y : 0;
-    const shipInRange = game.mode==='flight' && ship.alive && Math.hypot(dx,dy) < CONFIG.kamikaze.triggerRange;
+    // chases the ship while flying, or the pilot on foot — same trigger range and closing speed
+    // either way, per Mike's request that a kamikaze still pursue (and kill) an on-foot player rather
+    // than only ever threatening the ship. Nothing to chase while the player is hidden/respawning or
+    // inside a building (see the pilot.hidden check and the 'interior' fallthrough to null below) —
+    // same pattern Roamer._maybeShoot already uses for "whichever the player currently is". Also
+    // nothing to chase while the WAVE COMPLETE banner is up, per Mike's request — the player is
+    // invulnerable during that window anyway (see WaveManager.triggerComplete), so a kamikaze
+    // visibly charging at them the whole time would just read as broken rather than harmless.
+    const target = game.waves.complete ? null
+      : game.mode==='flight' ? (game.ship.alive ? game.ship : null)
+      : game.mode==='foot' ? (!game.pilot.hidden ? game.pilot : null)
+      : null;
+    const targetY = target === game.pilot ? target.midY : (target ? target.y : 0);
 
-    if(shipInRange){
+    // true radial distance to the target, per Mike's request ("within 300px")
+    const dx = target ? wrapDelta(this.x, target.x) : 0;
+    const dy = target ? targetY - this.y : 0;
+    const targetInRange = !!target && Math.hypot(dx,dy) < CONFIG.kamikaze.triggerRange;
+
+    if(targetInRange){
       this.attacking = true;
       const speed = this._chaseSpeed(game);
       const dist = Math.hypot(dx,dy) || 1;

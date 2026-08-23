@@ -23,7 +23,13 @@ export class DrumMachine {
     this.timer = null;
     this.bpm = CONFIG.audio.music.bpm;
     this.duckUntil = 0;
+    this.shipMoving = false; // gates kick/snare — see setShipMoving and _playStep
   }
+
+  // per Mike's request: kick and snare only play while the ship is actually moving. Set once per
+  // frame from live ship state (see Game._updateAudioLoops) rather than read directly, so the
+  // scheduler doesn't need a game/ship reference of its own.
+  setShipMoving(moving){ this.shipMoving = moving; }
 
   get stepDuration(){ return 60 / this.bpm / 4; } // a sixteenth note
 
@@ -81,8 +87,12 @@ export class DrumMachine {
 
   _playStep(step, when){
     const m = CONFIG.audio.music;
-    if(m.kick[step]      === 'X') DRUMS.kick(this.ctx, this.gain, when, m.kickVolume);
-    if(m.snare[step]     === 'X') DRUMS.snare(this.ctx, this.gain, when, m.snareVolume);
+    // kick/snare drop out while the ship is parked, per Mike's request — the hats keep ticking either
+    // way, so the beat never goes fully silent, just loses its punch
+    if(this.shipMoving){
+      if(m.kick[step]  === 'X') DRUMS.kick(this.ctx, this.gain, when, m.kickVolume);
+      if(m.snare[step] === 'X') DRUMS.snare(this.ctx, this.gain, when, m.snareVolume);
+    }
     if(m.hatOpen[step]   === 'X') DRUMS.hatOpen(this.ctx, this.gain, when, m.hatOpenVolume);
     // an open hat on the same step would just be masked by the closed one, so they're exclusive
     else if(m.hatClosed[step] === 'X') DRUMS.hatClosed(this.ctx, this.gain, when, m.hatClosedVolume);

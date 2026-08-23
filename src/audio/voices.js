@@ -148,9 +148,15 @@ export const ONE_SHOTS = {
   }},
   // two kamikazes meeting head-on, per Mike's request — a real boom, noticeably bigger than a single
   // kamikazeDeath, in the same weight class as buildingCollapse
-  kamikazeCollision: { bus:'sfx', dur:0.5, maxVoices:2, render:(ctx,d,o)=>{
-    noise(ctx, d, { dur:0.42, gain:0.42*o.gain, filter:'lowpass', from:3000, to:80, Q:1.8 });
-    tone(ctx, d, { type:'sawtooth', from:150, to:35, dur:0.4, gain:0.22*o.gain });
+  // stretched to CONFIG.kamikaze.collisionExplosionDuration (3s), per Mike's request — a sharp
+  // initial crack (same weight as before) followed by a long rumbling tail, rather than a single
+  // short boom just played back slower
+  kamikazeCollision: { bus:'sfx', dur:CONFIG.kamikaze.collisionExplosionDuration, maxVoices:2, render:(ctx,d,o)=>{
+    const tail = CONFIG.kamikaze.collisionExplosionDuration;
+    noise(ctx, d, { dur:0.45, gain:0.42*o.gain, filter:'lowpass', from:3400, to:150, Q:1.8 });
+    tone(ctx, d, { type:'sawtooth', from:170, to:35, dur:0.4, gain:0.22*o.gain });
+    noise(ctx, d, { dur:tail, gain:0.24*o.gain, filter:'lowpass', from:600, to:35, Q:1, attack:0.08 });
+    tone(ctx, d, { type:'sawtooth', from:80, to:20, dur:tail*0.9, gain:0.1*o.gain, attack:0.08 });
   }},
 
   // --- bombs ---

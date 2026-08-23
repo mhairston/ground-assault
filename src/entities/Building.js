@@ -69,10 +69,17 @@ export class Building {
     this.holes.push({ dx: holeDx, y: holeY, radius: holeRadius });
     game.spawnDebris(hitX, hitY, '#9a8a78', CONFIG.building.debrisOnHit);
     game.sound.play('buildingHit', { x: this.x });
-    if(this.hp <= 0) this._collapse(game);
+    if(this.hp <= 0) this.collapse(game);
   }
 
-  _collapse(game){
+  // destroys the building outright, regardless of remaining HP — used both by damage() above once hp
+  // runs out, and directly by a kamikaze hitting the building (see Game.explodeKamikazeIntoBuilding),
+  // per Mike's request that a kamikaze impact destroy it immediately. Guarded so a building already
+  // gone can't be "destroyed" a second time (double score penalty, double debris) — damage() has no
+  // such guard of its own and can still call this on an already-destroyed building if two things hit
+  // it in the same tick, so the guard has to live here.
+  collapse(game){
+    if(this.destroyed) return;
     this.destroyed = true;
     game.addScore(CONFIG.scoring.perBuildingDestroyed); // -100 per building destroyed
     game.spawnDebris(this.x, GROUND_Y - this.height/2, '#6a5a48', CONFIG.building.debrisOnDestroy); // 4x the debris of a normal hit, per Mike's request

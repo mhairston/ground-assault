@@ -19,7 +19,7 @@ export class WaveManager {
 
   static word(n){ return WAVE_WORDS[n] || String(n); }
   static quotaFor(wave){ return Math.min(CONFIG.wave.baseQuota + CONFIG.wave.quotaPerWave*(wave-1), CONFIG.wave.quotaCap); }
-  static releaseRateFor(wave){ return Math.min(CONFIG.wave.releaseRateCap, Math.round(1 + (wave-1)/CONFIG.wave.releaseRateDivisor)); }
+  static releaseRateFor(wave){ return Math.min(CONFIG.wave.releaseRateCap, Math.round(CONFIG.wave.releaseRateBase + (wave-1)/CONFIG.wave.releaseRateDivisor)); }
 
   reset(){
     this.number = 1;
@@ -100,6 +100,12 @@ export class WaveManager {
     this.complete = true;
     this.statsToShow = { number: this.number, deaths: this.civDeaths, abductions: this.civAbductions, destroyed: this.enemiesDestroyed, rescues: this.civRescues };
     this.completeTimer = CONFIG.wave.completeOverlayDuration;
+    // invulnerable for exactly as long as the WAVE COMPLETE banner is up, per Mike's request — the
+    // world keeps running underneath it (roamers still hunt, bombs still fall), so without this a
+    // player could get blindsided while looking at their own congratulations screen. Math.max rather
+    // than a flat assignment, in case a respawn's own (shorter) invuln window is still ticking down.
+    this.game.ship.invuln = Math.max(this.game.ship.invuln, this.completeTimer);
+    this.game.pilot.invuln = Math.max(this.game.pilot.invuln, this.completeTimer);
     // flat per-wave bonus (Mike specified 500 for wave one; no growth formula was given, so every
     // wave awards the same flat bonus — flag this for confirmation)
     this.game.addScore(CONFIG.wave.completeBonus);

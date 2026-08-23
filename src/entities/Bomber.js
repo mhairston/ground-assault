@@ -42,7 +42,10 @@ export class Bomber {
   // restart resets it along with everything else
   static updateAll(bombers, dt, game){
     game.bomberRespawn -= dt;
-    if(game.bomberRespawn <= 0 && bombers.filter(bo=>bo.alive).length < CONFIG.bomber.maxAlive){
+    // don't start appearing until minWave, per Mike's request — the timer still counts down underneath
+    // regardless, so one can appear right away once that wave actually starts rather than needing a
+    // full fresh cycle first
+    if(game.waves.number >= CONFIG.bomber.minWave && game.bomberRespawn <= 0 && bombers.filter(bo=>bo.alive).length < CONFIG.bomber.maxAlive){
       Bomber.spawn(game);
       game.bomberRespawn = CONFIG.bomber.respawnTimerBase + Math.random()*CONFIG.bomber.respawnTimerRandRange;
     }

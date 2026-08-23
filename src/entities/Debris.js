@@ -1,4 +1,4 @@
-import { CONFIG, W } from '../config.js';
+import { CONFIG, W, GROUND_Y } from '../config.js';
 import { relX } from '../core/geometry.js';
 
 // small fading fragments for destroyed roamers, explosions, building hits and deaths
@@ -7,15 +7,23 @@ class Fragment {
   // it on top of its own outward burst, so debris from a moving thing trails off along the path it
   // was travelling. Sources that were sitting still (or have no velocity to speak of, like a
   // building taking a hit) pass 0/0 and get the original burst-from-rest behavior exactly.
-  constructor(x, y, color, srcVx, srcVy){
+  // life overrides the usual lifeMin..lifeMin+lifeRandRange roll with a fixed duration instead — used
+  // by an explosion that needs to visibly linger longer than a normal kill's debris (see
+  // Game.explodeKamikazeWith), without changing how long every OTHER burst in the game lasts
+  constructor(x, y, color, srcVx, srcVy, life = null){
     const ang = Math.random()*Math.PI*2, spd = 40+Math.random()*100;
     const spread = CONFIG.debris.momentumSpread;
     const share = CONFIG.debris.momentumInherit * (1 + (Math.random()*2-1)*spread);
     this.x = x; this.y = y;
     this.vx = Math.cos(ang)*spd + srcVx*share;
     this.vy = Math.sin(ang)*spd - 50 + srcVy*share;
-    this.life = CONFIG.debris.lifeMin + Math.random()*CONFIG.debris.lifeRandRange;
-    this.maxLife = CONFIG.debris.lifeMin + CONFIG.debris.lifeRandRange;
+    // maxLife is deliberately NOT always "this frame's own life": in the normal (no override) case
+    // it's the fixed top of the whole lifeMin..lifeMin+lifeRandRange roll, so a fragment that happens
+    // to roll a short life also starts out already partway faded — that's the existing look for every
+    // ordinary burst in the game, and an explicit override must not disturb it. An overridden life
+    // instead gets its own matching maxLife, so it starts fully opaque and fades over its full span.
+    if(life != null){ this.life = life; this.maxLife = life; }
+    else { this.life = CONFIG.debris.lifeMin + Math.random()*CONFIG.debris.lifeRandRange; this.maxLife = CONFIG.debris.lifeMin + CONFIG.debris.lifeRandRange; }
     this.color = color;
   }
 }
@@ -29,10 +37,10 @@ export class DebrisField {
   // explosion is over. One number handed back at spawn time, so a caller can time something to the
   // end of it without holding a reference to the fragments or polling the field (see
   // Camera.followWreckage).
-  spawn(x, y, color, count, srcVx = 0, srcVy = 0){
+  spawn(x, y, color, count, srcVx = 0, srcVy = 0, life = null){
     let longest = 0;
     for(let i=0;i<count;i++){
-      const frag = new Fragment(x, y, color, srcVx, srcVy);
+      const frag = new Fragment(x, y, color, srcVx, srcVy, life);
       this.items.push(frag);
       longest = Math.max(longest, frag.life);
     }
@@ -47,6 +55,9 @@ export class DebrisField {
       d.x += d.vx*dt; d.y += d.vy*dt;
       d.vy += CONFIG.debris.gravity*dt;
       d.vx *= keep; d.vy *= keep;
+      // stops at ground level rather than falling through it, per Mike's request — settles there
+      // (no more vertical motion) and just fades out over whatever life it has left
+      if(d.y > GROUND_Y){ d.y = GROUND_Y; d.vy = 0; }
       d.life -= dt;
     }
     this.items = this.items.filter(d => d.life > 0);

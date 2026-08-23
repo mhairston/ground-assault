@@ -14,12 +14,16 @@ export class CollisionSystem {
     this._bulletsVsBombers(game);
     this._bulletsVsKamikazes(game);
     this._kamikazesVsEnemies(game);
+    this._kamikazesVsBuildings(game);
     // player gunfire no longer damages buildings — it just passes through them harmlessly. The only
     // way to damage a building yourself is by ramming it with the ship (see _shipVsWorld).
     game.playerBullets = game.playerBullets.filter(b=>!b.dead);
 
     if(game.mode==='flight' && game.ship.alive && game.ship.invuln<=0) this._shipVsWorld(game);
-    if(game.mode==='foot' && !game.pilot.hidden && game.pilot.invuln<=0) this._pilotVsBullets(game);
+    if(game.mode==='foot' && !game.pilot.hidden && game.pilot.invuln<=0){
+      this._pilotVsBullets(game);
+      this._kamikazesVsPilot(game);
+    }
     this._enemyBulletsVsBuildings(game);
     game.enemyBullets = game.enemyBullets.filter(eb=>!eb.dead);
   }
@@ -112,10 +116,6 @@ export class CollisionSystem {
     game.kamikazes = game.kamikazes.filter(k=>k.alive);
   }
 
-  // If two kamikazes touch each other — not the ship — they take each other out entirely, per
-  // Mike's request: a much bigger blast than either dies with alone (see Game.explodeKamikazePair).
-  // Checked as a bounding-box overlap using their own w/h, same "hit box matches image size"
-  // treatment the ship itself got.
   // A kamikaze that touches ANY other enemy — a roamer, a bomber, or another kamikaze — detonates,
   // taking both out in one big blast (see Game.explodeKamikazeWith), per Mike's request: originally
   // just kamikaze-vs-kamikaze, now extended to every enemy type. Checked as a bounding-box overlap
@@ -123,14 +123,27 @@ export class CollisionSystem {
   // Each kamikaze only takes ONE other enemy with it per frame (roamer checked first, then bomber,
   // then another kamikaze) — the `continue` after a hit is what enforces that, so a kamikaze that
   // lands in the middle of a crowd doesn't chain-explode through all of it in a single tick.
+  //
+  // Only while actually pursuing a target (k.attacking), per Mike's request — an idle/patrolling
+  // kamikaze just drifts past other enemies harmlessly, same as it drifts past the player without
+  // triggering anything until it's committed to an attack run. Gated on the kamikaze doing the
+  // checking, not the other party: a pursuing kamikaze detonates on anything it plows into, whether
+  // or not THAT thing happens to be attacking anyone itself.
   _kamikazesVsEnemies(game){
     for(const k of game.kamikazes){
-      if(!k.alive) continue;
+      if(!k.alive || !k.attacking) continue;
       let exploded = false;
       for(const r of game.roamers){
         if(!r.alive) continue;
         if(Math.abs(wrapDelta(k.x,r.x)) < (k.w+r.w)/2 && Math.abs(k.y-r.y) < (k.h+r.h)/2){
           game.explodeKamikazeWith(k, r, CONFIG.scoring.perRoamerKilled);
+          // Deliberately NOT filtered out of game.roamers here (see the bottom of this method) and
+          // NOT resolved-counted here either — r just sits alive===false in the array for the rest of
+          // this tick, same as a bullet or ram kill, so the very next Roamer.updateAll/countResolved
+          // pass picks it up exactly once, the same way every other roamer death is credited. Filtering
+          // or crediting it here too would either double-count it there or (worse, as bullet kills
+          // discovered) drop it from the array before that pass ever runs, so it's never credited at
+          // all — see WaveManager.countResolved and the bug this used to cause.
           exploded = true;
           break;
         }
@@ -153,8 +166,31 @@ export class CollisionSystem {
         }
       }
     }
-    game.roamers = game.roamers.filter(r=>r.alive);
+    // Roamers are deliberately left out of this cleanup — see the comment above at the kamikaze-vs-
+    // roamer check. game.bombers/game.kamikazes have no such wave-accounting contract to honor, so
+    // they're filtered immediately as before.
     game.bombers = game.bombers.filter(bo=>bo.alive);
+    game.kamikazes = game.kamikazes.filter(k=>k.alive);
+  }
+
+  // A kamikaze that touches a building destroys it immediately, per Mike's request — regardless of
+  // remaining HP — and the kamikaze goes with it (see Game.explodeKamikazeIntoBuilding). The
+  // building's footprint/altitude test is the same box the ship's own ram-a-building check uses
+  // (RAM_DAMAGES_BUILDINGS, below), just without that check's extra edge/roof tolerances — a
+  // kamikaze is small, so its own x/y is close enough. In practice this only ever fires during an
+  // actual attack run: idle patrol sits well above rooftop height (see Kamikaze's spawnY), so a
+  // kamikaze can't stumble into a building just by wandering.
+  _kamikazesVsBuildings(game){
+    for(const k of game.kamikazes){
+      if(!k.alive) continue;
+      for(const bld of game.buildings){
+        if(bld.destroyed) continue;
+        if(!bld.containsX(k.x)) continue;
+        if(k.y < bld.roofY || k.y > GROUND_Y) continue;
+        game.explodeKamikazeIntoBuilding(k, bld);
+        break;
+      }
+    }
     game.kamikazes = game.kamikazes.filter(k=>k.alive);
   }
 
@@ -214,6 +250,20 @@ export class CollisionSystem {
     const footMidY = pilot.midY;
     for(const eb of game.enemyBullets){
       if(!eb.dead && Math.abs(wrapDelta(eb.x,pilot.x)) < 8 && Math.abs(eb.y-footMidY) < 12){ eb.dead = true; game.loseLife(); }
+    }
+  }
+
+  // A kamikaze that reaches the on-foot pilot kills them and destroys itself, per Mike's request —
+  // same tolerance box as _pilotVsBullets above, since neither is meant to be a different size than
+  // the other things that already threaten the pilot on foot.
+  _kamikazesVsPilot(game){
+    const pilot = game.pilot;
+    const footMidY = pilot.midY;
+    for(const k of game.kamikazes){
+      if(k.alive && Math.abs(wrapDelta(pilot.x,k.x)) < 8 && Math.abs(footMidY-k.y) < 12){
+        game.explodeKamikazeIntoPilot(k);
+        break; // pilot is dead/respawning now — no need to check the rest this tick
+      }
     }
   }
 }
