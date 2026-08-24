@@ -114,11 +114,14 @@ export class EnemyBullet extends BulletBase {
 
   static drawAll(bullets, ctx, camera){
     ctx.globalAlpha = 1;
-    ctx.fillStyle = '#ff5e7a';
     for(const b of bullets){
       const sx = relX(camera.x, b.x);
       if(sx<-4||sx>W+4) continue;
-      ctx.fillRect(sx-3, b.y-1, 6, 2);
+      ctx.fillStyle = '#ff86a0';
+      ctx.fillRect(sx-4, b.y-2, 8, 4);
+      ctx.fillStyle = '#ffd6df';
+      ctx.fillRect(sx-2, b.y-1, 4, 2);
     }
+    ctx.globalAlpha = 1;
   }
 }

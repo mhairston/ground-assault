@@ -19,7 +19,7 @@ export class CollisionSystem {
     // way to damage a building yourself is by ramming it with the ship (see _shipVsWorld).
     game.playerBullets = game.playerBullets.filter(b=>!b.dead);
 
-    if(game.mode==='flight' && game.ship.alive && game.ship.invuln<=0) this._shipVsWorld(game);
+    if(game.mode==='flight' && game.ship.alive && !game.isShipInvulnerable()) this._shipVsWorld(game);
     if(game.mode==='foot' && !game.pilot.hidden && game.pilot.invuln<=0){
       this._pilotVsBullets(game);
       this._kamikazesVsPilot(game);
@@ -237,8 +237,7 @@ export class CollisionSystem {
         if(bld.destroyed) continue;
         const roofY = GROUND_Y - bld.height;
         if(Math.abs(wrapDelta(ship.x,bld.x)) < bld.width/2 + CONFIG.building.ramTolXPastEdge && ship.y > roofY - CONFIG.building.ramTolYAboveRoof && ship.y < GROUND_Y + CONFIG.building.ramTolYBelowGround){
-          bld.damage(ship.x, ship.y, game);
-          game.loseLife();
+          game.shipCrashIntoBuilding(bld);
           break;
         }
       }

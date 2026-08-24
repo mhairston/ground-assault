@@ -20,7 +20,11 @@ const fitToWindow = () => {
 fitToWindow();
 window.addEventListener('resize', fitToWindow);
 
-const game = new Game(canvas);
+const waveParam = new URLSearchParams(window.location.search).get('wave');
+const parsedWave = Number.parseInt(waveParam ?? '', 10);
+const startWave = Number.isFinite(parsedWave) && parsedWave >= 1 ? parsedWave : 1;
+
+const game = new Game(canvas, document, { startWave });
 game.start();
 
 // handy for poking at state from the devtools console

@@ -2,7 +2,7 @@
 // that move every frame; the two one-shot actions (board/land, restart) are delivered as callbacks
 // so a single physical press can never be re-triggered by a later frame reading a still-held key.
 export class Input {
-  constructor(speedSelectEl, { onBoardOrLand = () => {}, onP = () => {}, onGesture = () => {}, onMute = () => {} } = {}){
+  constructor(speedSelectEl, { onBoardOrLand = () => {}, onP = () => {}, onGesture = () => {}, onMute = () => {}, onToggleShipDebugInvuln = () => {} } = {}){
     this.keys = {};
     this.simSpeed = 1;
     this.speeds = [1,2,4,8];
@@ -11,6 +11,7 @@ export class Input {
     this.onP = onP;
     this.onGesture = onGesture;
     this.onMute = onMute;
+    this.onToggleShipDebugInvuln = onToggleShipDebugInvuln;
 
     if(this.speedSelect){
       this.speedSelect.addEventListener('change', () => this.setSimSpeed(parseInt(this.speedSelect.value,10)));
@@ -49,5 +50,7 @@ export class Input {
     if(e.code === 'KeyA' && !e.repeat) this.onBoardOrLand();
     // M mutes/unmutes everything. !e.repeat so holding it doesn't strobe the mute state.
     if(e.code === 'KeyM' && !e.repeat) this.onMute();
+    // 0 toggles debug ship god mode (permanent invulnerability while enabled).
+    if(e.code === 'Digit0' && !e.repeat) this.onToggleShipDebugInvuln();
   }
 }

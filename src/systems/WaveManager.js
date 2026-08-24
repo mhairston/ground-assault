@@ -5,12 +5,13 @@ import { Humanoid } from '../entities/Humanoid.js';
 
 const WAVE_WORDS = ['ZERO','ONE','TWO','THREE','FOUR','FIVE','SIX','SEVEN','EIGHT','NINE','TEN'];
 
-// Roamer waves: wave 1 releases 10 roamers total, each subsequent wave adds 5 more, capped at 45.
-// Roamers aren't all released at once — they trickle in 1 at a time early on, ramping up to 3 at a
-// time by wave 7. A wave is "cleared" (and the next one begins) once every roamer that belonged to
-// it is gone, however that happened — shot down, superbombed, rammed, or successfully escaping off
-// the top of the screen with a captive. Bombers are deliberately outside this system entirely:
-// they're a persistent, wave-independent threat with no per-wave quota.
+// Roamer waves: wave 1 releases 10 roamers total, each subsequent wave adds 5 more, capped at 505
+// (so quota scaling now continues through wave 100). Roamers aren't all released at once — they
+// trickle in early, then release in larger chunks as waves rise, until the release-rate cap is hit.
+// A wave is "cleared" (and the next one begins) once every roamer that belonged to it is gone,
+// however that happened — shot down, superbombed, rammed, or successfully escaping off the top of
+// the screen with a captive. Bombers are deliberately outside this system entirely: they're a
+// persistent, wave-independent threat with no per-wave quota.
 export class WaveManager {
   constructor(game){
     this.game = game;
@@ -21,8 +22,8 @@ export class WaveManager {
   static quotaFor(wave){ return Math.min(CONFIG.wave.baseQuota + CONFIG.wave.quotaPerWave*(wave-1), CONFIG.wave.quotaCap); }
   static releaseRateFor(wave){ return Math.min(CONFIG.wave.releaseRateCap, Math.round(CONFIG.wave.releaseRateBase + (wave-1)/CONFIG.wave.releaseRateDivisor)); }
 
-  reset(){
-    this.number = 1;
+  reset(startWave = 1){
+    this.number = Math.max(1, Math.floor(startWave));
     this.quota = WaveManager.quotaFor(this.number);
     this.spawned = 0;
     this.resolved = 0;
@@ -44,6 +45,12 @@ export class WaveManager {
     this.totalCivAbductions = 0;
     this.totalCivRescues = 0;
     this.totalEnemiesDestroyed = 0;
+
+    // Starting above wave 1 should reflect the same civilian growth steps that would already
+    // have happened at each wave transition.
+    for(let i=1;i<this.number;i++){
+      for(let n=0;n<CONFIG.humanoid.growthPerWave;n++) this.game.humanoids.push(new Humanoid(wrapX(Math.random()*WORLD_W)));
+    }
   }
 
   get word(){ return WaveManager.word(this.number); }

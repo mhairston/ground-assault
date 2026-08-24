@@ -76,6 +76,89 @@ function melody(ctx, dest, { root=440, notes=[], type='triangle', gain=0.2, note
   }
 }
 
+function explosionConfig(id){
+  const cfg = CONFIG.audio.explosions?.[id] ?? {};
+  return {
+    frequency: Math.max(30, cfg.frequency ?? 170),
+    duration: Math.max(0.06, cfg.duration ?? 0.3),
+    volume: Math.max(0, cfg.volume ?? 1),
+  };
+}
+
+// Shared explosion voicing: a sharp initial crack plus a low rumbling tail, based on the
+// kamikazeCollision character. Each sound id tunes this shape with CONFIG.audio.explosions.*.
+// The cry a civilian gives when a roamer grabs them. Shared by `capture` and `civilianYelp` in the
+// table below, which are the same sound and differ only in how many of them may sound at once — see
+// the comment on civilianYelp. Kept as one function so the two can never drift apart.
+function abductionCry(ctx, dest, o){
+  tone(ctx, dest, { type:'sawtooth', from:900, to:180, dur:0.22, gain:0.2*o.gain });
+  tone(ctx, dest, { type:'sine', from:450, to:90, dur:0.24, gain:0.12*o.gain });
+}
+
+function collisionStyleExplosion(ctx, dest, o, id, { brightness=1, crack=1, tail=1 } = {}){
+  const cfg = explosionConfig(id);
+  const jitter = (amt = 0.1) => 1 + (Math.random()*2 - 1)*amt;
+  const base = cfg.frequency * jitter(0.12);
+  const dur = cfg.duration * jitter(0.1);
+  const level = o.gain * cfg.volume;
+  const crackDur = Math.min(0.45, Math.max(0.06, dur * 0.25));
+  const tailDur = Math.max(0.07, dur * tail);
+  const bright = brightness * jitter(0.12);
+  const crackGain = crack * jitter(0.15);
+  const tailGain = jitter(0.18);
+
+  noise(ctx, dest, {
+    dur: crackDur,
+    gain: 0.42 * crackGain * level,
+    filter: 'lowpass',
+    from: base * 26 * bright,
+    to: base * 1.05,
+    Q: 1.8,
+  });
+  tone(ctx, dest, {
+    type: 'sawtooth',
+    from: base * 1.05,
+    to: base * 0.19,
+    dur: crackDur,
+    gain: 0.24 * crackGain * level,
+  });
+
+  tone(ctx, dest, {
+    type: 'square',
+    from: base * 1.8,
+    to: base * 0.35,
+    dur: Math.max(0.05, crackDur * 0.8),
+    gain: 0.08 * crackGain * level,
+  });
+
+  noise(ctx, dest, {
+    dur: tailDur,
+    gain: 0.24 * tailGain * level,
+    filter: 'lowpass',
+    from: base * 6,
+    to: base * 0.14,
+    Q: 1,
+    attack: 0.045,
+  });
+  tone(ctx, dest, {
+    type: 'sawtooth',
+    from: base * 0.52,
+    to: base * 0.1,
+    dur: Math.max(0.06, tailDur * 0.9),
+    gain: 0.11 * tailGain * level,
+    attack: 0.045,
+  });
+
+  tone(ctx, dest, {
+    type: 'sine',
+    from: base * 0.18,
+    to: base * 0.06,
+    dur: Math.max(0.08, tailDur),
+    gain: 0.06 * tailGain * level,
+    attack: 0.07,
+  });
+}
+
 // ---- one-shots ---------------------------------------------------------------------------------
 // bus: which sub-mix it belongs to (sfx / ui / ambient). dur: roughly how long it occupies a voice
 // slot, used for the concurrency cap. minGap: the shortest allowed spacing between two of these,
@@ -93,11 +176,14 @@ export const ONE_SHOTS = {
     tone(ctx, d, { type:'square', from:880, to:300, dur:0.08, gain:0.13*o.gain }) },
   burstCooldown: { bus:'ui', dur:0.06, render:(ctx,d,o)=>
     noise(ctx, d, { dur:0.05, gain:0.06*o.gain, filter:'lowpass', from:900, to:300 }) },
-  // the biggest sound in the game: a long filter sweep from bright to subsonic
-  superbomb: { bus:'sfx', dur:0.75, maxVoices:1, render:(ctx,d,o)=>{
-    noise(ctx, d, { dur:0.65, gain:0.5*o.gain, filter:'lowpass', from:7000, to:60, Q:2 });
-    tone(ctx, d, { type:'sawtooth', from:180, to:28, dur:0.6, gain:0.28*o.gain });
-  }},
+  // the biggest sound in the game, now in the same sonic family as kamikazeCollision but bigger
+  superbomb: { bus:'sfx', dur:CONFIG.audio.explosions.superbomb.duration, maxVoices:1, render:(ctx,d,o)=>
+    collisionStyleExplosion(ctx, d, o, 'superbomb', { brightness: 1.35, crack: 1.65, tail: 1.2 }) },
+  // ...and bigger still: the ship going into a building. Same family, tuned darker and with the
+  // longest tail of anything in the game, since it plays under a slow-motion explosion. maxVoices:1
+  // because there is exactly one of these at a time by construction — the ship is destroyed by it.
+  shipCrash: { bus:'sfx', dur:CONFIG.audio.explosions.shipCrash.duration, maxVoices:1, render:(ctx,d,o)=>
+    collisionStyleExplosion(ctx, d, o, 'shipCrash', { brightness: 1.15, crack: 1.8, tail: 1.5 }) },
 
   // --- on foot ---
   footstep: { bus:'sfx', dur:0.07, minGap:CONFIG.audio.footstepGap, render:(ctx,d,o)=>
@@ -121,68 +207,45 @@ export const ONE_SHOTS = {
   roamerShot: { bus:'sfx', dur:0.12, maxVoices:5, render:(ctx,d,o)=>
     tone(ctx, d, { type:'sawtooth', from:420, to:240, dur:0.11, gain:0.11*o.gain }) },
   // the Defender abduction alarm: an unsettling glide downward
-  capture: { bus:'sfx', dur:0.26, maxVoices:2, render:(ctx,d,o)=>{
-    tone(ctx, d, { type:'sawtooth', from:900, to:180, dur:0.22, gain:0.2*o.gain });
-    tone(ctx, d, { type:'sine', from:450, to:90, dur:0.24, gain:0.12*o.gain });
-  }},
-  roamerDeath: { bus:'sfx', dur:0.2, maxVoices:4, render:(ctx,d,o)=>{
-    noise(ctx, d, { dur:0.16, gain:0.3*o.gain, filter:'highpass', from:1800, to:400 });
-    tone(ctx, d, { type:'square', from:260, to:60, dur:0.14, gain:0.14*o.gain });
-  }},
+  capture: { bus:'sfx', dur:0.26, maxVoices:2, render:abductionCry },
+  roamerDeath: { bus:'sfx', dur:CONFIG.audio.explosions.roamerDeath.duration, maxVoices:4, render:(ctx,d,o)=>
+    collisionStyleExplosion(ctx, d, o, 'roamerDeath', { brightness: 1.18, crack: 1.05, tail: 0.85 }) },
   // a hit that doesn't finish the job — a bomber takes two, per Mike's request. Sharper and much
   // shorter than bomberDeath below, so the two are tellable apart: this one says "hit, but still flying".
-  bomberHit: { bus:'sfx', dur:0.14, maxVoices:4, render:(ctx,d,o)=>{
-    noise(ctx, d, { dur:0.08, gain:0.22*o.gain, filter:'highpass', from:2200, to:900 });
-    tone(ctx, d, { type:'square', from:520, to:300, dur:0.09, gain:0.12*o.gain });
-  }},
+  bomberHit: { bus:'sfx', dur:CONFIG.audio.explosions.bomberHit.duration, maxVoices:4, render:(ctx,d,o)=>
+    collisionStyleExplosion(ctx, d, o, 'bomberHit', { brightness: 1.65, crack: 0.95, tail: 0.6 }) },
   // same crack as a roamer, pitched down so the two are tellable apart in a crowded fight
-  bomberDeath: { bus:'sfx', dur:0.24, maxVoices:4, render:(ctx,d,o)=>{
-    noise(ctx, d, { dur:0.2, gain:0.3*o.gain, filter:'highpass', from:1200, to:220 });
-    tone(ctx, d, { type:'square', from:170, to:40, dur:0.18, gain:0.15*o.gain });
-  }},
+  bomberDeath: { bus:'sfx', dur:CONFIG.audio.explosions.bomberDeath.duration, maxVoices:4, render:(ctx,d,o)=>
+    collisionStyleExplosion(ctx, d, o, 'bomberDeath', { brightness: 1.0, crack: 1.2, tail: 1.0 }) },
   // a small detonation rather than a plain crack — lowpass noise burst like a bomb impact, since a
   // kamikaze goes out with a bang, not a whimper
-  kamikazeDeath: { bus:'sfx', dur:0.3, maxVoices:4, render:(ctx,d,o)=>{
-    noise(ctx, d, { dur:0.24, gain:0.32*o.gain, filter:'lowpass', from:1400, to:150 });
-    tone(ctx, d, { type:'square', from:200, to:50, dur:0.2, gain:0.16*o.gain });
-  }},
+  kamikazeDeath: { bus:'sfx', dur:CONFIG.audio.explosions.kamikazeDeath.duration, maxVoices:4, render:(ctx,d,o)=>
+    collisionStyleExplosion(ctx, d, o, 'kamikazeDeath', { brightness: 1.2, crack: 1.2, tail: 1.0 }) },
   // two kamikazes meeting head-on, per Mike's request — a real boom, noticeably bigger than a single
   // kamikazeDeath, in the same weight class as buildingCollapse
-  // stretched to CONFIG.kamikaze.collisionExplosionDuration (3s), per Mike's request — a sharp
-  // initial crack (same weight as before) followed by a long rumbling tail, rather than a single
-  // short boom just played back slower
-  kamikazeCollision: { bus:'sfx', dur:CONFIG.kamikaze.collisionExplosionDuration, maxVoices:2, render:(ctx,d,o)=>{
-    const tail = CONFIG.kamikaze.collisionExplosionDuration;
-    noise(ctx, d, { dur:0.45, gain:0.42*o.gain, filter:'lowpass', from:3400, to:150, Q:1.8 });
-    tone(ctx, d, { type:'sawtooth', from:170, to:35, dur:0.4, gain:0.22*o.gain });
-    noise(ctx, d, { dur:tail, gain:0.24*o.gain, filter:'lowpass', from:600, to:35, Q:1, attack:0.08 });
-    tone(ctx, d, { type:'sawtooth', from:80, to:20, dur:tail*0.9, gain:0.1*o.gain, attack:0.08 });
-  }},
+  // long duration by default (3s) so it can ring out while debris lingers; tune in
+  // CONFIG.audio.explosions.kamikazeCollision.duration
+  kamikazeCollision: { bus:'sfx', dur:CONFIG.audio.explosions.kamikazeCollision.duration, maxVoices:2, render:(ctx,d,o)=>
+    collisionStyleExplosion(ctx, d, o, 'kamikazeCollision', { brightness: 1.35, crack: 1.35, tail: 1.15 }) },
 
   // --- bombs ---
   bombDrop: { bus:'sfx', dur:0.16, maxVoices:3, render:(ctx,d,o)=>
     tone(ctx, d, { type:'sine', from:700, to:260, dur:0.14, gain:0.07*o.gain }) },
-  bombHitBuilding: { bus:'sfx', dur:0.34, render:(ctx,d,o)=>{
-    noise(ctx, d, { dur:0.3, gain:0.34*o.gain, filter:'lowpass', from:900, to:70, Q:1.4 });
-    tone(ctx, d, { type:'sine', from:110, to:38, dur:0.28, gain:0.24*o.gain });
-  }},
+  bombHitBuilding: { bus:'sfx', dur:CONFIG.audio.explosions.bombHitBuilding.duration, render:(ctx,d,o)=>
+    collisionStyleExplosion(ctx, d, o, 'bombHitBuilding', { brightness: 0.92, crack: 1.08, tail: 1.0 }) },
   // duller and less resonant than a building hit — soil rather than concrete
-  bombHitGround: { bus:'sfx', dur:0.3, render:(ctx,d,o)=>{
-    noise(ctx, d, { dur:0.26, gain:0.28*o.gain, filter:'lowpass', from:520, to:60 });
-    tone(ctx, d, { type:'sine', from:90, to:34, dur:0.22, gain:0.16*o.gain });
-  }},
+  bombHitGround: { bus:'sfx', dur:CONFIG.audio.explosions.bombHitGround.duration, render:(ctx,d,o)=>
+    collisionStyleExplosion(ctx, d, o, 'bombHitGround', { brightness: 0.7, crack: 0.95, tail: 0.95 }) },
   // a reward, so it's bright and short where every other bomb sound is low and heavy
   bombIntercept: { bus:'sfx', dur:0.18, maxVoices:3, render:(ctx,d,o)=>
     melody(ctx, d, { root:1046, type:'sine', gain:0.16*o.gain, notes:[[0,0,0.07],[7,0.05,0.11]] }) },
 
   // --- buildings ---
-  buildingHit: { bus:'sfx', dur:0.18, render:(ctx,d,o)=>
-    noise(ctx, d, { dur:0.14, gain:0.22*o.gain, filter:'bandpass', from:1400, to:500, Q:1.2 }) },
+  buildingHit: { bus:'sfx', dur:CONFIG.audio.explosions.buildingHit.duration, render:(ctx,d,o)=>
+    collisionStyleExplosion(ctx, d, o, 'buildingHit', { brightness: 1.45, crack: 0.88, tail: 0.55 }) },
   // the loudest, longest thing that isn't a superbomb — 64 fragments deserve a tail
-  buildingCollapse: { bus:'sfx', dur:0.9, maxVoices:2, render:(ctx,d,o)=>{
-    noise(ctx, d, { dur:0.8, gain:0.45*o.gain, filter:'lowpass', from:1600, to:45, Q:1.6 });
-    tone(ctx, d, { type:'sawtooth', from:120, to:26, dur:0.75, gain:0.26*o.gain });
-  }},
+  buildingCollapse: { bus:'sfx', dur:CONFIG.audio.explosions.buildingCollapse.duration, maxVoices:2, render:(ctx,d,o)=>
+    collisionStyleExplosion(ctx, d, o, 'buildingCollapse', { brightness: 1.1, crack: 1.45, tail: 1.25 }) },
   suppressant: { bus:'sfx', dur:0.7, render:(ctx,d,o)=>{
     noise(ctx, d, { dur:0.4, gain:0.16*o.gain, filter:'highpass', from:3000, to:6000 });
     melody(ctx, d, { root:784, type:'sine', gain:0.16*o.gain, notes:[[0,0.34,0.22]] });
@@ -195,6 +258,12 @@ export const ONE_SHOTS = {
     melody(ctx, d, { root:659, type:'sine', gain:0.2*o.gain, notes:[[0,0,0.12],[5,0.1,0.2]] }) },
   civilianSafe: { bus:'sfx', dur:0.1, render:(ctx,d,o)=>
     noise(ctx, d, { dur:0.07, gain:0.1*o.gain, filter:'lowpass', from:1100, to:380 }) },
+  // Exactly the cry above, per Mike's request that a civilian falling out of a collapsing building
+  // sound like one being abducted. It has its own id purely for concurrency: a collapse throws up to
+  // twelve of these into the air within a second or two, and capture's 2-voice cap — right for
+  // abductions, which arrive one at a time — would silently swallow most of them, which is the one
+  // thing this must not do when the request is that EACH of them yelps. Same recipe either way.
+  civilianYelp: { bus:'sfx', dur:0.26, maxVoices:6, render:abductionCry },
   civilianLost: { bus:'sfx', dur:0.3, maxVoices:2, render:(ctx,d,o)=>
     melody(ctx, d, { root:392, type:'triangle', gain:0.16*o.gain, notes:[[3,0,0.14],[-2,0.12,0.2]] }) },
 

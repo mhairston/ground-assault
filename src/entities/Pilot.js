@@ -55,6 +55,7 @@ export class Pilot {
   }
 
   update(dt, game){
+    if(this.hidden) return;
     const input = game.input;
     if(this.invuln>0) this.invuln -= dt;
 
@@ -65,7 +66,7 @@ export class Pilot {
     // carried items — usable from any on-foot substate; each is consumed on a successful use
     // (the fire-suppressant check bails out with no effect, and no consumption, if there's no
     // valid damaged building nearby, so it's never wasted on a bad press)
-    if(input.isDown('KeyS') && this.superbombCount>0) game.useSuperbomb();
+    if(input.isDown('KeyS') && (this.superbombCount>0 || game.debugShipInvulnerable)) game.useSuperbomb();
     if(input.isDown('KeyF') && this.fireSuppressantCount>0) game.useFireSuppressant();
 
     const speed = CONFIG.pilot.speed; // 110 * 1.4 — on-foot movement is 40% faster than the original prototype

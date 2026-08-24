@@ -22,6 +22,19 @@ export class Building {
     return Math.max(CONFIG.building.hpMin, Math.min(CONFIG.building.hpMax, scaled));
   }
 
+  // How many people are inside, per Mike's request: 4-12 depending on the building's size. Same
+  // footprint-area basis as hpFor above rather than width alone (which is what this used to key off,
+  // and which made a 240px tower no more populated than the squat warehouse next to it) — a tower is
+  // tall, and the floors are where the occupants are. Scaled between hpAreaReference (the original
+  // 90x90 block) and fullOccupancyArea, so the smallest house in the default city sits near the
+  // minimum and the tallest tower is full. They come out as FallingCivilians when it collapses.
+  static occupantsFor(width, height){
+    const { collapseFallerMin: min, collapseFallerMax: max, hpAreaReference, fullOccupancyArea } = CONFIG.building;
+    const span = Math.max(1, fullOccupancyArea - hpAreaReference);
+    const frac = Math.max(0, Math.min(1, (width*height - hpAreaReference) / span));
+    return Math.round(min + (max - min)*frac);
+  }
+
   // number/placement/sizing of buildings is entirely driven by CONFIG.buildings — edit that array to
   // add, remove, resize, or reposition buildings.
   constructor({ x, width, height, style, hasLandingPad }){
@@ -78,11 +91,17 @@ export class Building {
   // gone can't be "destroyed" a second time (double score penalty, double debris) — damage() has no
   // such guard of its own and can still call this on an already-destroyed building if two things hit
   // it in the same tick, so the guard has to live here.
-  collapse(game){
+  // srcVx/srcVy: the velocity of whatever knocked this building down, if it had one — a ship or a
+  // kamikaze that flew into it. Everything the collapse throws inherits a share of it, per Mike's
+  // request that all the debris from one impact read as one event rather than as a fireball flung
+  // one way and rubble dropping straight down beside it. Omitted (0/0) by the collapses that really
+  // do happen from rest: a building shelled to death by bombs or gunfire, where nothing arrived
+  // carrying momentum at all and the rubble should just fall.
+  collapse(game, srcVx = 0, srcVy = 0){
     if(this.destroyed) return;
     this.destroyed = true;
     game.addScore(CONFIG.scoring.perBuildingDestroyed); // -100 per building destroyed
-    game.spawnDebris(this.x, GROUND_Y - this.height/2, '#6a5a48', CONFIG.building.debrisOnDestroy); // 4x the debris of a normal hit, per Mike's request
+    game.spawnDebris(this.x, GROUND_Y - this.height/2, '#6a5a48', CONFIG.building.debrisOnDestroy, srcVx, srcVy); // 4x the debris of a normal hit, per Mike's request
     game.sound.play('buildingCollapse', { x: this.x });
     // any human still alive within 10px of the building (i.e. close enough that its footprint plus
     // a 10px margin reaches them) goes down with it, per Mike's request
@@ -91,6 +110,20 @@ export class Building {
         h.alive = false;
         game.loseHumanoid(h, 'killed');
       }
+    }
+    const fallers = Building.occupantsFor(this.width, this.height);
+    // Only a couple of the crowd get a caption, per Mike's request. Taking the first few needs no
+    // shuffle to be a random couple: the x/y below are random, so which of the fallers ends up
+    // captioned is already unrelated to where they come out of the building.
+    const captioned = Math.min(fallers, CONFIG.fallingCivilian.curseCount);
+    // consecutive indices from a random start, so the captions on screen at once are always
+    // different strings rather than occasionally the same one twice — see FallingCivilian's
+    // constructor, which owns the actual list and does the wrapping
+    const firstCurse = Math.floor(Math.random()*1000);
+    for(let i=0;i<fallers;i++){
+      const x = wrapX(this.x - this.width/2 + Math.random()*this.width);
+      const y = this.roofY + 10 + Math.random()*Math.max(10, this.height*0.55);
+      game.spawnFallingCivilian(x, y, { curseIndex: i < captioned ? firstCurse + i : null, srcVx, srcVy });
     }
     // if the player was on/climbing this building when it came down, drop them to the ground
     game.pilot.dropFrom(this);

@@ -90,7 +90,7 @@ export class Ship {
     this._fire(dt, game);
 
     // superbomb usable from the ship too, not just on foot — same shared stash/effect
-    if(game.input.isDown('KeyS') && game.pilot.superbombCount>0) game.useSuperbomb();
+    if(game.input.isDown('KeyS') && (game.pilot.superbombCount>0 || game.debugShipInvulnerable)) game.useSuperbomb();
 
     // landing itself is triggered by pressing A — see Game.tryBoardOrLand().
     if(this.invuln>0) this.invuln -= dt;

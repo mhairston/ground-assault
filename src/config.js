@@ -48,8 +48,39 @@ export const CONFIG = {
                                   // visual variation in bomb damage — see Building.damage
     debrisOnHit: 36,
     debrisOnDestroy: 64,
+    // ---- ship-vs-building crash, per Mike's request: the ship and the building are BOTH destroyed,
+    // it is the biggest explosion in the game, the whole thing plays out in slow motion, and the
+    // SHIP LOST / GAME OVER overlay waits for it to finish. See Game.shipCrashIntoBuilding. ----
+    // a ship slamming into a building should be the biggest boom in the game.
+    shipCrashDebris: 140,
+    // How long the whole spectacle runs for, in seconds. The sequence plays at normal speed, per
+    // Mike's request — an earlier version ran it in slow motion, and the machinery for that (a
+    // world-wide time scale on Game) came out with it, since the crash was its only user.
+    //
+    // Doubles as the explicit lifetime of the crash debris (see Game.shipCrashIntoBuilding), which
+    // is what makes the timing deterministic: the fireball is deliberately the LONGEST-lived
+    // element, so "the animation" is exactly this long whatever building was hit, rather than
+    // something that has to be discovered by watching.
+    //
+    // Sized off the worst case it has to outlast, which is not the fall but the fall plus its
+    // aftermath: a civilian thrown clear of the tallest building takes ~1.5s to reach the ground
+    // under captive.fallGravity, and the splat debris they throw off on landing lives another
+    // debris.lifeMin+lifeRandRange (0.9s) on top. Raise this if buildings get taller, if
+    // captive.fallGravity drops, or if debris lives longer.
+    shipCrashAnimDuration: 2.4,
+    // ...then this long a beat of stillness, per Mike's request, before SHIP LOST / GAME OVER.
+    shipCrashOverlayPause: 2,
+    // Visual-only civilians that tumble out of a collapsing building, cursing. This is the
+    // building's occupancy: 4-12 of them depending on how big it is, per Mike's request. Scaled on
+    // footprint area against the same reference building Building.hpFor uses, so the biggest tower
+    // in the default city is full and the smallest house is nearly empty. See Building.occupantsFor.
+    collapseFallerMin: 4,
+    collapseFallerMax: 12,
+    // footprint area (w*h) at which a building is considered fully occupied, i.e. hits
+    // collapseFallerMax. 19200 is the default city's largest building, the 80x240 tower.
+    fullOccupancyArea: 19200,
     humanDeathRadiusPastEdge: 30,     // how far past a destroyed building's footprint a human still dies
-    ramDamagesBuildingsDefault: false, // see RAM_DAMAGES_BUILDINGS
+    ramDamagesBuildingsDefault: true, // see RAM_DAMAGES_BUILDINGS
     ramTolXPastEdge: 12, ramTolYAboveRoof: 6, ramTolYBelowGround: 4,
   },
   shipPad: { x: 60 },
@@ -90,7 +121,7 @@ export const CONFIG = {
     burstSize: 8,
     burstInterval: 0.06,
     burstCooldown: 0.5,
-    landDist: 30, 
+    landDist: 30,
     landSpeedFrac: 0.1, // fraction of maxSpeed that counts as "moving slowly enough" to land.
     boardDist: 16,
     boardLiftHeight: 24, // on boarding, the ship visibly lifts this many px above wherever it boarded
@@ -155,7 +186,7 @@ export const CONFIG = {
     // scaled with the sprite too: at the old 18/14 spacing, 30%-larger roamers visibly overlap each
     // other, which is the same "they look wrong next to each other" problem separation exists to fix
     separationDist: 23, separationY: 18, separationPush: 30,
-    gunfireRange: 480, gunfireSpeed: 7,
+    gunfireRange: 480, gunfireSpeed: 6,
     shootTimerMin: 1.6, shootTimerRandRange: 1.6,
     initialShootTimerMin: 1, initialShootTimerRandRange: 2.5,
     outOfRangeRecheck: 0.4,
@@ -185,9 +216,11 @@ export const CONFIG = {
   wave: {
     baseQuota: 10,
     quotaPerWave: 5,
-    quotaCap: 45,
-    releaseRateCap: 3,
-    releaseRateDivisor: 6,
+    // keep growing until wave 100 (10 + 5*(100-1) = 505), then cap
+    quotaCap: 505,
+    // release rate scaling now runs all the way to wave 100 too
+    releaseRateCap: 22,
+    releaseRateDivisor: 5,
     // was 1 (hardcoded in the formula) — doubled, per Mike's request that more roamers be in the air
     // at once from wave 1 on, so a spawn landing near the player happens sooner even with the
     // "anywhere on the map" spawn placement. See WaveManager.releaseRateFor.
@@ -235,17 +268,14 @@ export const CONFIG = {
     wanderSpeed: 80, // idle drift while no ship is in range — never holds perfectly still
     // closing speed once it commits to an attack run — climbs slowly wave over wave, per Mike's
     // request, capped so it's never flatly unavoidable even deep into a long run
-    baseChaseSpeed: 110, chaseSpeedPerWave: 6, maxChaseSpeed: 220,
+    // cap moved to wave-100 equivalent (110 + 6*(100-1) = 704)
+    baseChaseSpeed: 110, chaseSpeedPerWave: 6, maxChaseSpeed: 704,
     turnEaseRate: 8, // how fast its drawn heading eases toward its actual direction of travel
     bulletTolX: 12, bulletTolY: 8,
     // if a kamikaze touches any other enemy (rather than the ship), they take each other out in one
     // much bigger blast than either dies with alone, per Mike's request — see Game.explodeKamikazeWith.
     // Well above enemyKillCount (16) and in the same league as a building collapsing (64).
     collisionDebrisCount: 60,
-    // how long that blast lingers, per Mike's request — both the debris (see Game.explodeKamikazeWith,
-    // which passes this as the fragments' fixed life) and the kamikazeCollision sound itself (see
-    // voices.js, which reads this directly) are driven off this one value, so they stay in sync
-    collisionExplosionDuration: 3,
   },
   bomb: {
     fallSpeed: 130,
@@ -263,6 +293,34 @@ export const CONFIG = {
                                        // where bomb damage lands on a building's face
     maxGroundScorches: 150,
     debrisOnExplode: 50,
+  },
+  // Visual-only civilians thrown clear of a collapsing building (see entities/FallingCivilian.js).
+  // How many there are is the building's business — that's its occupancy, building.collapseFallerMin/
+  // Max — so what lives here is only what they do on the way down.
+  fallingCivilian: {
+    // Only a couple of them show a curse, per Mike's request. Every one captioned put a wall of text
+    // over the explosion and made the individual figures impossible to pick out; the rest still fall
+    // and still yelp, they just do it quietly. Building.collapse spawns them at random positions, so
+    // the couple that get a caption are already a random couple of the crowd.
+    curseCount: 2,
+    curseFontPx: 18, // up from 10, per Mike's request — the one font size that isn't a draw-method
+                     // literal, because at this size it has to be checked against the clearance the
+                     // caption is drawn at (see FallingCivilian.draw)
+    // Each one lets out the same cry a civilian gives when a roamer grabs them, per Mike's request,
+    // held off by a random delay in this window so a collapse scatters them rather than firing one
+    // chord of twelve. Counted in game time like everything else, so a slow-motion ship crash
+    // stretches the scatter out in real time too, which is exactly where it's most audible.
+    //
+    // The window is also what keeps the voice cap off them. Twelve 0.26s cries inside 0.9s pile up
+    // past civilianYelp's concurrency limit often enough to swallow one in most collapses, which
+    // would quietly break the "each of them yelps" part of the request; 1.2s drops that to about one
+    // collapse in ten losing a single cry. Widening it further trades against the fall itself — much
+    // past this and fallers off a low roof are landing before their turn comes (they yelp on impact
+    // instead, see FallingCivilian._yelp, but that is a cluster rather than a scatter).
+    yelpDelayMin: 0.05, yelpDelayRandRange: 1.2,
+    // tumbling end over end as they fall, per Mike's request. Radians/sec; the direction is
+    // randomised per faller, so a crowd doesn't rotate as one.
+    spinMin: 2.2, spinRandRange: 4.5,
   },
   captive: {
     // falls from rest and accelerates, per Mike's request (previously a flat 70px/s) — tuned gentler
@@ -389,13 +447,33 @@ export const CONFIG = {
     // higher and faster-pulsing than the other two, so a kamikaze's presence reads as more urgent
     kamikazeDrone: { baseHz: 200, volume: 0.09, perKamikaze: 0.06, lfoHz: 2.6, lfoPerKamikaze: 0.3 },
     bombWhistle: { fromHz: 1250, toHz: 400, volume: 0.12 },
+    // Explosion one-shots share the same synthesis family (modeled after kamikazeCollision), with
+    // per-type tuning for pitch-center, decay length, and level so each blast can be adjusted
+    // independently without touching src/audio/voices.js.
+    explosions: {
+      superbomb: { frequency: 145, duration: 1.15, volume: 1.42 },
+      // the biggest one in the game, per Mike's request — lower and far longer-tailed than the
+      // superbomb, so a building crash is audibly a bigger event than any weapon the player carries.
+      // Sized to the fireball it plays under (building.shipCrashAnimDuration), so the last of the
+      // rumble dies away as the last of the wreckage does.
+      shipCrash: { frequency: 92, duration: 2.5, volume: 1.5 },
+      roamerDeath: { frequency: 235, duration: 0.32, volume: 1.05 },
+      bomberHit: { frequency: 360, duration: 0.19, volume: 0.96 },
+      bomberDeath: { frequency: 150, duration: 0.42, volume: 1.2 },
+      kamikazeDeath: { frequency: 180, duration: 0.5, volume: 1.18 },
+      kamikazeCollision: { frequency: 160, duration: 3.3, volume: 1.4 },
+      bombHitBuilding: { frequency: 115, duration: 0.52, volume: 1.2 },
+      bombHitGround: { frequency: 82, duration: 0.45, volume: 1.05 },
+      buildingHit: { frequency: 280, duration: 0.26, volume: 0.95 },
+      buildingCollapse: { frequency: 115, duration: 1.35, volume: 1.45 },
+    },
     // rate limits for sounds that would otherwise fire many times a second
     footstepGap: 0.26, climbTickGap: 0.22, civilianYelpGap: 1.0,
     music: {
       enabled: true,
       bpm: 120,
-      // tempo climbs with the waves, per the plan. Each entry is [fromWave, bpm], applied in order.
-      tempoSteps: [[5, 140], [8, 160]],
+      // tempo climbs with the waves through late-game wave counts.
+      tempoSteps: [[5, 140], [8, 160], [12, 172], [15, 184], [25, 192], [40, 200], [60, 208], [80, 214], [100, 220]],
       // 16 sixteenth-note steps, exactly the pattern drawn in the plan. Edit these strings to change
       // the beat — 'X' is a hit, anything else is a rest, and all four voices share the same grid.
       kick:     'X....X..X.X.....',
@@ -457,10 +535,10 @@ export const BUILDING_STYLES = {
   house:     { base:[70,48,38],  window:[210,190,130], accent:[150,90,60] },
 };
 
-// config: whether flying the ship into a building costs a life and damages it (the logic is kept
-// intact in CollisionSystem, just gated behind this flag). Defaults to false per Mike's request — by
-// default the ship simply flies in front of/through buildings unharmed, no collision at all. Flip to
-// true to restore the old ramming-has-consequences behavior.
+// config: whether flying the ship into a building is a collision at all. On (the default), the crash
+// destroys BOTH of them in the game's biggest explosion — see Game.shipCrashIntoBuilding. Flip to
+// false and the ship simply passes in front of/through buildings unharmed, with the whole crash path
+// in CollisionSystem._shipVsWorld skipped; the logic is kept intact behind this flag either way.
 export const RAM_DAMAGES_BUILDINGS = CONFIG.building.ramDamagesBuildingsDefault;
 
 // config: whether walking through a building's door drops the player into the little interior demo

@@ -13,6 +13,7 @@
      (see main.js / CONFIG.world.maxCanvasW). The values here are just the pre-script fallback. */
   #hud{display:flex;justify-content:space-between;width:960px;font-size:14px;margin-top:6px;color:#7a95b0;}
   #itemsLabel{color:#ffd76b;}
+  #debugLabel{color:#ff9c64;font-weight:bold;}
   #audioLabel{color:#5c7284;}
   #speedCtl{display:flex;align-items:center;gap:5px;}
   #speedSelect{background:#0b1524;color:#8ff0ff;border:1px solid #2a3a55;border-radius:3px;font-family:'Courier New',monospace;font-size:12px;padding:1px 3px;}
@@ -25,7 +26,7 @@
 <div id="wrap">
   <h1>GROUND ASSAULT</h1>
   <canvas id="c" width="960" height="540"></canvas>
-  <div id="hud"><span id="score">SCORE 0</span><span id="lives">SHIPS 3</span><span id="modeLabel">ON FOOT</span><span id="itemsLabel"></span><span id="audioLabel">SOUND ON (M)</span><span id="speedCtl">SIM <select id="speedSelect" title="Simulation speed — for faster testing"><option value="1">1x</option><option value="2">2x</option><option value="4">4x</option><option value="8">8x</option></select></span></div>
+  <div id="hud"><span id="score">SCORE 0</span><span id="lives">SHIPS 3</span><span id="modeLabel">ON FOOT</span><span id="itemsLabel"></span><span id="debugLabel"></span><span id="audioLabel">SOUND ON (M)</span><span id="speedCtl">SIM <select id="speedSelect" title="Simulation speed — for faster testing"><option value="1">1x</option><option value="2">2x</option><option value="4">4x</option><option value="8">8x</option></select></span></div>
   <div id="legend">
     <b>On foot:</b> <kbd>&larr;</kbd><kbd>&rarr;</kbd> run (incl. rooftops) &nbsp; <kbd>&uarr;</kbd> climb ladder &nbsp; <kbd>&darr;</kbd> climb down &nbsp; <kbd>SPACE</kbd> shoot straight up (hits bombs too) &nbsp; <kbd>A</kbd> board the ship when standing next to it &nbsp; <kbd>S</kbd> detonate a carried superbomb (clears every enemy on screen) &nbsp; <kbd>F</kbd> apply a carried fire-suppressant tank (fully repairs a nearby damaged building) &nbsp;
     <b>In flight:</b> <kbd>&larr;</kbd><kbd>&rarr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd> thrust &nbsp; <kbd>SPACE</kbd> fire in short bursts (pauses to cool down) &nbsp; <kbd>S</kbd> detonate a carried superbomb &nbsp; <kbd>A</kbd> land when flying slow and close over the ground or a landing-pad rooftop &nbsp;

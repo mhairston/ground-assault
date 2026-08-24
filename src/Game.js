@@ -14,6 +14,7 @@ import { Kamikaze } from './entities/Kamikaze.js';
 import { Bomb } from './entities/Bomb.js';
 import { PlayerBullet, EnemyBullet } from './entities/Bullet.js';
 import { FallingCaptive } from './entities/FallingCaptive.js';
+import { FallingCivilian } from './entities/FallingCivilian.js';
 import { DebrisField } from './entities/Debris.js';
 import { PickupField } from './entities/Pickup.js';
 import { ScorchField } from './entities/GroundScorch.js';
@@ -29,7 +30,7 @@ import { SoundManager } from './audio/SoundManager.js';
 // a single kind of thing lives on that class; what lives here is the wiring: tick order, the
 // cross-cutting choke points (score, civilian losses, life loss), and the mode transitions.
 export class Game {
-  constructor(canvas, doc = document){
+  constructor(canvas, doc = document, { startWave = 1 } = {}){
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.hud = new Hud(doc);
@@ -47,6 +48,8 @@ export class Game {
     this.collisions = new CollisionSystem(this);
     this.renderer = new Renderer(this.ctx, this);
     this.sound = new SoundManager(this.camera);
+    this.debugShipInvulnerable = false;
+    this.startWave = Math.max(1, Math.floor(startWave));
 
     this.input = new Input(doc.getElementById('speedSelect'), {
       // no-ops during the title screen — nothing but P does anything until the game has started
@@ -72,6 +75,12 @@ export class Game {
         if(fresh && !this.gameOver) this.sound.startMusic();
       },
       onMute: () => { if(!this.titleScreen) this.hud.setAudio(this.sound.toggleMute()); },
+      onToggleShipDebugInvuln: () => {
+        if(this.titleScreen) return;
+        this.debugShipInvulnerable = !this.debugShipInvulnerable;
+        if(this.debugShipInvulnerable) this.ship.invuln = Infinity;
+        else if(!Number.isFinite(this.ship.invuln)) this.ship.invuln = 0;
+      },
     });
 
     // Switching tabs/apps auto-pauses, per Mike's request — otherwise the whole world (roamers,
@@ -121,6 +130,8 @@ export class Game {
     this.finalHighScores = null;
     this.finalScore = null;
     this.finalWaveNumber = null; // which wave was active at death — see loseLife and Renderer.drawGameOver
+    this.finalBeatHighScore = false;
+    this.finalScoreToBeat = 0;
     this.hud.setScore(this.score);
     this.hud.setLives(this.lives);
 
@@ -131,6 +142,7 @@ export class Game {
     this.playerBullets = [];
     this.enemyBullets = [];
     this.fallingCaptives = [];
+    this.fallingCivilians = [];
     this.debris.clear();
     this.pickups.reset();
     this.scorches.clear();
@@ -142,17 +154,22 @@ export class Game {
     if(this.sound){
       this.sound.locked = false;
       this.sound.stopAllLoops();
-      this.sound.setMusicWave(1);
+      this.sound.setMusicWave(this.startWave);
       this.sound.startMusic(); // no-op if the context isn't unlocked yet, or if it's already running
       this.hud.setAudio(this.sound.muted);
     }
     this.respawn = null;
 
-    this.waves.reset();
+    this.waves.reset(this.startWave);
     this.waves.releaseRoamers();
     // painted once here rather than left to the first update() tick, so the HUD reads correctly (mode,
     // carried items) immediately — including during the title screen, when update() never runs at all
     this.updateHud();
+  }
+
+  // Debug toggle makes ship immunity absolute across all ship-hit paths.
+  isShipInvulnerable(){
+    return this.debugShipInvulnerable || this.ship.invuln > 0;
   }
 
   // ---- shared choke points -------------------------------------------------
@@ -173,6 +190,7 @@ export class Game {
   spawnDebris(x, y, color, count, srcVx = 0, srcVy = 0, life = null){ return this.debris.spawn(x, y, color, count, srcVx, srcVy, life); }
 
   spawnFallingCaptive(x, y){ this.fallingCaptives.push(new FallingCaptive(x, y)); }
+  spawnFallingCivilian(x, y, opts){ this.fallingCivilians.push(new FallingCivilian(x, y, opts)); }
 
   // a human is only ever scored/counted once, even if (e.g.) an already-abducted captive is later
   // also caught in a building-destruction blast
@@ -222,9 +240,9 @@ export class Game {
     k.alive = false; other.alive = false;
     const midX = wrapX(k.x + wrapDelta(k.x,other.x)/2), midY = (k.y+other.y)/2;
     this.addScore(CONFIG.scoring.perKamikazeKilled + otherScore);
-    // lingers for collisionExplosionDuration (3s), per Mike's request — well past the usual ~0.5-0.9s
-    // debris life — and the kamikazeCollision sound itself is tuned to the same length (see voices.js)
-    this.spawnDebris(midX, midY, '#ff3b3b', CONFIG.kamikaze.collisionDebrisCount, 0, 0, CONFIG.kamikaze.collisionExplosionDuration);
+    // lingers for the kamikazeCollision explosion duration, per Mike's request — well past the
+    // usual ~0.5-0.9s debris life — and kept in sync with the sound via one config field.
+    this.spawnDebris(midX, midY, '#ff3b3b', CONFIG.kamikaze.collisionDebrisCount, 0, 0, CONFIG.audio.explosions.kamikazeCollision.duration);
     this.sound.play('kamikazeCollision', { x: midX });
     this.waves.recordEnemyDestroyed(2);
     // a roamer caught mid-collision still drops whatever captive it was carrying, same as every
@@ -240,10 +258,12 @@ export class Game {
   explodeKamikazeIntoBuilding(k, bld){
     k.alive = false;
     this.addScore(CONFIG.scoring.perKamikazeKilled);
-    this.spawnDebris(k.x, k.y, '#ff3b3b', CONFIG.kamikaze.collisionDebrisCount, k.vx, k.vy, CONFIG.kamikaze.collisionExplosionDuration);
+    this.spawnDebris(k.x, k.y, '#ff3b3b', CONFIG.kamikaze.collisionDebrisCount, k.vx, k.vy, CONFIG.audio.explosions.kamikazeCollision.duration);
     this.sound.play('kamikazeCollision', { x: k.x });
     this.waves.recordEnemyDestroyed();
-    bld.collapse(this);
+    // its momentum carries into the collapse too, exactly as the ship's does — same impact, same
+    // reason for the rubble to be thrown the way the thing that caused it was travelling
+    bld.collapse(this, k.vx, k.vy);
   }
 
   // A kamikaze that reaches the on-foot pilot kills them and destroys itself, per Mike's request —
@@ -253,10 +273,43 @@ export class Game {
   explodeKamikazeIntoPilot(k){
     k.alive = false;
     this.addScore(CONFIG.scoring.perKamikazeKilled);
-    this.spawnDebris(k.x, k.y, '#ff3b3b', CONFIG.kamikaze.collisionDebrisCount, k.vx, k.vy, CONFIG.kamikaze.collisionExplosionDuration);
+    this.spawnDebris(k.x, k.y, '#ff3b3b', CONFIG.kamikaze.collisionDebrisCount, k.vx, k.vy, CONFIG.audio.explosions.kamikazeCollision.duration);
     this.sound.play('kamikazeCollision', { x: k.x });
     this.waves.recordEnemyDestroyed();
     this.loseLife();
+  }
+
+  onPilotAbducted(){
+    this.loseLife();
+  }
+
+  // Ship-vs-building impact: the biggest explosion in the game, and the only one that takes both
+  // parties with it outright, per Mike's request. The building COLLAPSES rather than merely taking a
+  // hit — which is what puts its occupants in the air (see Building.collapse -> occupantsFor: 4-12
+  // civilians tumbling out and cursing) and charges the player for the building on top of the ship.
+  //
+  // Everything thrown by the crash carries a share of the ship's momentum, per Mike's request: the
+  // fireball, the building's own rubble, and the people. Before that, only the fireball did, so a
+  // ship at full speed sheeted its own wreckage across the street while the building it had just
+  // demolished dropped its rubble straight down — one impact that looked like two unrelated events.
+  // The share and its per-item variation are debris.momentumInherit/momentumSpread, the same
+  // constants every other explosion in the game inherits momentum with.
+  //
+  // The sequence plays at normal speed, per Mike's request. Order matters here:
+  //   - the crash fireball goes up first, with an explicit fragment lifetime so it burns for exactly
+  //     as long as the spectacle lasts instead of guttering out halfway through it;
+  //   - then the building comes down, so its own debris and fallers layer on top of the fireball;
+  //   - then loseLife, which adds the ship's own death cloud and starts the overlay countdown.
+  shipCrashIntoBuilding(bld){
+    const c = CONFIG.building, ship = this.ship;
+    this.spawnDebris(ship.x, ship.y, '#ffe08a', c.shipCrashDebris, ship.vx, ship.vy, c.shipCrashAnimDuration);
+    this.sound.play('shipCrash', { x: ship.x });
+    bld.collapse(this, ship.vx, ship.vy);
+    // Both overlay paths (RespawnSequence's debris stage, and gameOverDisplayTimer) already build in
+    // their own ~0.9s "let the explosion play out" delay before showing anything, and this is the
+    // total wait rather than an addition to it — hence the subtraction.
+    const total = c.shipCrashAnimDuration + c.shipCrashOverlayPause;
+    this.loseLife(Math.max(0, total - CONFIG.respawn.debrisStageDuration));
   }
 
   nearestBuilding(x){
@@ -336,7 +389,7 @@ export class Game {
     // deliberately ONE boom for the whole sweep, not one per enemy caught: the superbomb is a single
     // event, and a dozen overlapping death cracks on top of it would just be mud
     this.sound.play('superbomb');
-    this.pilot.superbombCount--;
+    if(!this.debugShipInvulnerable) this.pilot.superbombCount--;
   }
 
   // fire-suppressant: fully repairs whichever damaged building the player is on/nearest to — only
@@ -395,19 +448,21 @@ export class Game {
 
   // ---- death and respawn ---------------------------------------------------
 
-  loseLife(){
+  loseLife(extraOverlayDelay = 0){
     if(this.gameOver) return; // defensive — nothing left to lose, and don't want a stray post-death hit re-triggering the high-score save
     this.lives--;
     this.hud.setLives(this.lives);
     if(this.lives<=0){
+      this.finalScoreToBeat = this.highScores.load()[0] ?? 0;
       this.gameOver = true;
-      this.gameOverDisplayTimer = CONFIG.respawn.gameOverDisplayDelay;
+      this.gameOverDisplayTimer = CONFIG.respawn.gameOverDisplayDelay + Math.max(0, extraOverlayDelay);
       // frozen here rather than read live off this.score at draw time: the world keeps simulating
       // after GAME OVER (an already-in-flight bullet can still kill a roamer, say), which can nudge
       // the score again after this exact value has already been saved to the board — reading it live
       // both showed a "final" score that kept changing and broke the high-score row match below
       // (Renderer.drawGameOver's lastIndexOf), since the live score no longer equalled anything on it.
       this.finalScore = this.score;
+      this.finalBeatHighScore = this.finalScore > this.finalScoreToBeat;
       // same freezing reasoning as finalScore above — the wave can still advance for a moment after
       // GAME OVER (the world keeps simulating), so this is captured once here rather than read live
       this.finalWaveNumber = this.waves.number;
@@ -434,7 +489,7 @@ export class Game {
       this.spawnDebris(this.pilot.x, this.pilot.midY, '#ff8b5e', CONFIG.debris.footDeathCount);
       this.pilot.hidden = true;
     }
-    this.respawn = new RespawnSequence(this.mode);
+    this.respawn = new RespawnSequence(this.mode, extraOverlayDelay);
   }
 
   // shared by the final death and the ordinary one so they can't drift apart: blow the ship up with
@@ -491,6 +546,8 @@ export class Game {
     else if(this.mode === 'interior') this.interior.update(dt, this);
     else if(this.mode === 'flight') this.ship.update(dt, this);
 
+    if(this.debugShipInvulnerable) this.ship.invuln = Infinity;
+
     this.roamers = Roamer.updateAll(this.roamers, dt, this);
     this.bombers = Bomber.updateAll(this.bombers, dt, this);
     this.kamikazes = Kamikaze.updateAll(this.kamikazes, dt, this);
@@ -500,6 +557,7 @@ export class Game {
     this.pickups.update(dt, this);
     if(this.superbombFlash > 0) this.superbombFlash -= dt;
     this.fallingCaptives = FallingCaptive.updateAll(this.fallingCaptives, dt, this);
+    this.fallingCivilians = FallingCivilian.updateAll(this.fallingCivilians, dt, this);
     this.debris.update(dt);
     this.camera.update(dt); // after the debris moves, so a drifting camera reads this frame's positions
     this._updateAudioLoops();
@@ -556,6 +614,17 @@ export class Game {
     if(pilot.superbombCount>0) carried.push('SUPERBOMB x'+pilot.superbombCount+' (S)');
     if(pilot.fireSuppressantCount>0) carried.push('FOAM x'+pilot.fireSuppressantCount+' (F)');
     this.hud.setItems(carried);
+    this.hud.setWaveAndEnemies(this.waves.number, this._currentEnemyCount());
+    this.hud.setDebugShipInvuln(this.debugShipInvulnerable);
+  }
+
+  _currentEnemyCount(){
+    let n = 0;
+    n += this.roamers.filter(r => r.alive).length;
+    n += this.bombers.filter(bo => bo.alive).length;
+    n += this.kamikazes.filter(k => k.alive).length;
+    n += this.bombs.filter(bm => !bm.exploded).length;
+    return n;
   }
 
   draw(){ this.renderer.draw(); }

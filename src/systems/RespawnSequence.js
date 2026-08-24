@@ -5,9 +5,9 @@ import { CONFIG } from '../config.js';
 // else in the world (roamers, bombs, bullets, debris, collisions) keeps running the whole time —
 // see Game.update.
 export class RespawnSequence {
-  constructor(mode){
+  constructor(mode, extraDebrisDelay = 0){
     this.stage = 'debris';   // 'debris' | 'showLives'
-    this.timer = CONFIG.respawn.debrisStageDuration;
+    this.timer = CONFIG.respawn.debrisStageDuration + Math.max(0, extraDebrisDelay);
     this.mode = mode;        // 'flight' | 'foot' — which one died, and so which one comes back
   }
 

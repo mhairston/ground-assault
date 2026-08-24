@@ -9,6 +9,13 @@ class Game {
   +loseHumanoid(h,kind)
   +killRoamer(r)
   +killBomber(bo)
+  +killKamikaze(k)
+  +explodeKamikazeWith(k,other,otherScore)
+  +explodeKamikazeIntoBuilding(k,bld)
+  +explodeKamikazeIntoPilot(k)
+  +shipCrashIntoBuilding(bld)
+  +spawnFallingCivilian(x,y)
+  +togglePause()
   +nearestBuilding(x)
   +landingSurfaceAt(x,y)
   +useSuperbomb()
@@ -26,6 +33,9 @@ class Game {
 class Camera {
   +follow(newX)
   +reset(x)
+  +followWreckage(shipVx,cloudLife)
+  +cancelDrift()
+  +update(dt)
 }
 
 class Input {
@@ -38,6 +48,9 @@ class Hud {
   +setLives(lives)
   +setMode(text)
   +setItems(parts)
+  +setWaveAndEnemies(wave,enemies)
+  +setDebugShipInvuln(on)
+  +setAudio(muted)
 }
 
 class HighScores {
@@ -47,6 +60,8 @@ class HighScores {
 
 class Renderer {
   +draw()
+  +drawTitleScreen(ctx,game)
+  +drawPaused(ctx,game)
   +drawShipLost(ctx,game)
   +drawWaveComplete(ctx,game)
   +drawGameOver(ctx,game)
@@ -92,6 +107,8 @@ class Building {
   +containsX(x)
   +repair()
   +damage(hitX,hitY,game)
+  +collapse(game,srcVx,srcVy)
+  +occupantsFor(width,height)$
   +draw(ctx,camera)
 }
 
@@ -185,6 +202,44 @@ class Interior {
   +draw(ctx)
 }
 
+class Kamikaze {
+  +spawn(game)$
+  +updateAll(kamikazes,dt,game)$
+  +update(dt,game)
+  +drawAll(kamikazes,ctx,camera)$
+  +draw(ctx,camera)
+}
+
+class FallingCivilian {
+  +updateAll(list,dt,game)$
+  +update(dt,game)
+  +drawAll(list,ctx,camera)$
+  +draw(ctx,camera)
+}
+
+class SoundManager {
+  +unlock()
+  +toggleMute()
+  +play(id,opts)
+  +loopWhile(key,on,state)
+  +stopAllLoops()
+  +startMusic()
+  +stopMusic(fade)
+  +setMusicWave(wave)
+  +setMusicShipMoving(moving)
+  +duckMusic(seconds)
+  +pause()
+  +resume()
+}
+
+class DrumMachine {
+  +start()
+  +stop(fade)
+  +setWave(wave)
+  +setShipMoving(moving)
+  +duck(seconds)
+}
+
 class BulletBase {
   +step()
   +isSpent(camX,maxRange)
@@ -222,14 +277,18 @@ Game "1" o-- "1..*" Building
 Game "1" o-- "0..*" Humanoid
 Game "1" o-- "0..*" Roamer
 Game "1" o-- "0..*" Bomber
+Game "1" o-- "0..*" Kamikaze
 Game "1" o-- "0..*" Bomb
 Game "1" o-- "0..*" FallingCaptive
+Game "1" o-- "0..*" FallingCivilian
 Game "1" o-- "0..*" PlayerBullet
 Game "1" o-- "0..*" EnemyBullet
 Game "1" o-- "1" DebrisField
 Game "1" o-- "1" PickupField
 Game "1" o-- "1" ScorchField
+Game "1" o-- "1" SoundManager
 
 Renderer "1" o-- "1" Backdrop
 Renderer "1" o-- "1" Radar
+SoundManager "1" o-- "0..1" DrumMachine
 PickupField "1" o-- "0..*" Pickup

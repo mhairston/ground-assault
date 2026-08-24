@@ -27,7 +27,9 @@ export class Roamer {
     this.descending = true;
     this.descendTargetY = CONFIG.roamer.descendTargetYBase+Math.random()*CONFIG.roamer.descendTargetYRandRange;
     this.target = null;
+    this.targetIsPilot = false;
     this.carrying = false;
+    this.carryingPilot = false;
     this.departing = false;
     this.escapeDir = 1;
     this.phase = Math.random()*10;
@@ -82,7 +84,10 @@ export class Roamer {
       const escapeDir = this.escapeDir || 1;
       this.x = wrapX(this.x + escapeDir*CONFIG.roamer.escapeSpeed*dt + Math.sin(this.phase*1.5)*4*dt); // 2x horizontal speed, per Mike's request
       this._trackVelocity(prevX, prevY, dt);
-      if(this.y < -40) this.alive = false;
+      if(this.y < -40){
+        if(this.carryingPilot) game.onPilotAbducted();
+        this.alive = false;
+      }
       return;
     }
 
@@ -129,6 +134,14 @@ export class Roamer {
       this.target = best;
     }
     if(this.target && (!this.target.alive || this.target.safe)) this.target = null;
+    if(this.targetIsPilot && (game.mode !== 'foot' || game.pilot.hidden || game.pilot.invuln > 0)) this.target = null;
+    if(!this.target){
+      this.targetIsPilot = false;
+      if(game.mode === 'foot' && !game.pilot.hidden && game.pilot.invuln <= 0) {
+        this.target = game.pilot;
+        this.targetIsPilot = true;
+      }
+    }
   }
 
   _hunt(dt, game){
@@ -138,7 +151,8 @@ export class Roamer {
     // ship uses at its lowest during a ground-level dive, so expect more ship-roamer collisions
     // during a capture dive than before; flagged in the design brief. Roamers can also grab a target
     // that's up on a rooftop or partway down a ladder, not just on the ground.
-    const captureY = this.target.topY + CONFIG.roamer.captureOffset; // near the target's feet, however tall they are
+    const targetTopY = this.targetIsPilot ? this.target.y : this.target.topY;
+    const captureY = targetTopY + CONFIG.roamer.captureOffset; // near the target's feet, however tall they are
     // A target can be anywhere in the world (the nearest-living-humanoid search has no distance
     // limit), so a roamer that just acquired one might be thousands of pixels away horizontally.
     // Diving to captureY immediately meant it would then cruise the ENTIRE horizontal approach at
@@ -172,7 +186,8 @@ export class Roamer {
     const climbSpeed = Math.sign(dy) * Math.min(Math.abs(dy)*CONFIG.roamer.diveGain, MAX_DIVE_SPEED);
     this.y += climbSpeed*dt + Math.sin(this.phase*2)*2*dt;
     if(overheadOfTarget && Math.abs(dx) < CONFIG.roamer.captureTolX && Math.abs(this.y-captureY) < CONFIG.roamer.captureTolY){
-      this._capture(game);
+      if(this.targetIsPilot) this._capturePilot(game);
+      else this._capture(game);
     }
   }
 
@@ -187,6 +202,22 @@ export class Roamer {
     // consistent diagonal escape, not an oscillation back to a net-zero drift
     this.escapeDir = Math.random() < 0.5 ? -1 : 1;
     this.target = null;
+    this.targetIsPilot = false;
+  }
+
+  _capturePilot(game){
+    if(game.mode !== 'foot' || game.pilot.hidden || game.pilot.invuln > 0){
+      this.target = null;
+      this.targetIsPilot = false;
+      return;
+    }
+    game.sound.play('capture', { x: this.x });
+    this.carryingPilot = true;
+    game.pilot.hidden = true;
+    this.departing = true;
+    this.escapeDir = Math.random() < 0.5 ? -1 : 1;
+    this.target = null;
+    this.targetIsPilot = false;
   }
 
   // no humanoids left to hunt — keep patrolling instead of hovering in place, gently easing back
@@ -253,6 +284,14 @@ export class Roamer {
       ctx.fillRect(sx-2, this.y+baseY+1, 4, 9);
       ctx.beginPath(); ctx.arc(sx, this.y+baseY-1, 3, 0, Math.PI*2); ctx.fill();
       ctx.strokeStyle = 'rgba(255,215,107,0.5)';
+      ctx.beginPath(); ctx.moveTo(sx, this.y+baseY-4); ctx.lineTo(sx, this.y-6); ctx.stroke();
+    }
+    if(this.carryingPilot){
+      ctx.fillStyle = '#ff8b5e';
+      ctx.fillRect(sx-2, this.y+baseY+1, 4, 9);
+      ctx.fillStyle = '#ffd8c2';
+      ctx.beginPath(); ctx.arc(sx, this.y+baseY-1, 3, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,139,94,0.6)';
       ctx.beginPath(); ctx.moveTo(sx, this.y+baseY-4); ctx.lineTo(sx, this.y-6); ctx.stroke();
     }
     // tilts back slightly opposite its direction of travel — a small sense of momentum/lean rather

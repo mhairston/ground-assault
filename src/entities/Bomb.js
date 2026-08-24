@@ -50,7 +50,7 @@ export class Bomb {
     const ship = game.ship, pilot = game.pilot;
 
     // Direct bomb-body collision while in flight.
-    if(game.mode==='flight' && ship.alive && ship.invuln<=0){
+    if(game.mode==='flight' && ship.alive && !game.isShipInvulnerable()){
       // the ship's hit box is its actual image size, per Mike's request — see CollisionSystem
       // ._shipVsWorld, which reads this same ship.w/2, ship.h/2 pair
       const hitShipX = Math.abs(wrapDelta(ship.x, this.x)) < ship.w/2;
@@ -115,7 +115,7 @@ export class Bomb {
 
   _blastPlayer(game, footWasOnThisRoof, impactY){
     const ship = game.ship, pilot = game.pilot;
-    if(game.mode==='flight' && ship.alive && ship.invuln<=0 && Math.abs(wrapDelta(ship.x,this.x))<30 && Math.abs(ship.y-impactY)<CONFIG.bomb.blastYTol){
+    if(game.mode==='flight' && ship.alive && !game.isShipInvulnerable() && Math.abs(wrapDelta(ship.x,this.x))<30 && Math.abs(ship.y-impactY)<CONFIG.bomb.blastYTol){
       game.loseLife();
       return;
     }

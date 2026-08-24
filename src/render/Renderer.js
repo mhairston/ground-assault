@@ -7,6 +7,7 @@ import { Bomber } from '../entities/Bomber.js';
 import { Kamikaze } from '../entities/Kamikaze.js';
 import { Bomb } from '../entities/Bomb.js';
 import { FallingCaptive } from '../entities/FallingCaptive.js';
+import { FallingCivilian } from '../entities/FallingCivilian.js';
 import { PlayerBullet, EnemyBullet } from '../entities/Bullet.js';
 import { WaveManager } from '../systems/WaveManager.js';
 
@@ -48,6 +49,7 @@ export class Renderer {
     game.debris.draw(ctx, camera);
     game.ship.draw(ctx, camera);
     FallingCaptive.drawAll(game.fallingCaptives, ctx, camera);
+    FallingCivilian.drawAll(game.fallingCivilians, ctx, camera);
     if(game.mode==='foot') game.pilot.draw(ctx, camera);
     PlayerBullet.drawAll(game.playerBullets, ctx, camera);
     EnemyBullet.drawAll(game.enemyBullets, ctx, camera);
@@ -79,6 +81,9 @@ export class Renderer {
     ctx.fillText('GROUND ASSAULT', W/2, H/2-20);
     ctx.fillStyle = '#eaffff'; ctx.font = 'bold 16px monospace';
     ctx.fillText('PRESS P TO START', W/2, H/2+20);
+    const scoreToBeat = game.highScores.load()[0] ?? 0;
+    ctx.fillStyle = '#ffd76b'; ctx.font = '14px monospace';
+    ctx.fillText('Score to beat: ' + scoreToBeat, W/2, H/2+46);
     ctx.textAlign = 'left';
   }
 
@@ -143,6 +148,13 @@ export class Renderer {
     // loseLife), since the world can still advance a wave for a moment after GAME OVER
     lines.push({ text:'WAVE REACHED: ' + WaveManager.word(game.finalWaveNumber), font:'14px monospace', color:'#8ff0ff', y });
     y += 22;
+    lines.push({
+      text: game.finalBeatHighScore ? 'NEW PERSONAL BEST' : 'DID NOT BEAT HIGH SCORE (' + game.finalScoreToBeat + ')',
+      font:'14px monospace',
+      color: game.finalBeatHighScore ? '#ffe066' : '#9fb7cc',
+      y,
+    });
+    y += 20;
     // same stats block as the WAVE COMPLETE overlay, per Mike's request — but run-wide (see
     // WaveManager.finalStats) rather than just whatever the in-progress wave happened to hold
     const stats = game.waves.finalStats;
