@@ -184,8 +184,9 @@ export class Ship {
   // vertically nearest, which for a tall landing-pad tower includes the whole band of airspace below
   // its roof but nearer to it than to the street. Treating the roof as a floor there yanked the ship
   // upward to roof height the moment it flew into that band — a teleport that read as the game
-  // landing for you, and Mike reported it as exactly that. Buildings aren't solid to the ship
-  // (RAM_DAMAGES_BUILDINGS is off), so flying below a roof is legitimate: down there the ordinary
+  // landing for you, and Mike reported it as exactly that. Buildings aren't solid to the ship by
+  // default (ramming only collides with them under Steve's house rules — see game.steve and
+  // CollisionSystem._shipVsWorld), so flying below a roof is legitimate: down there the ordinary
   // ground floor applies and the roof is simply ignored.
   //
   // "From above" has to be judged on prevY — where the ship was BEFORE this frame's move — not on

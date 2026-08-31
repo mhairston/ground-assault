@@ -1,19 +1,11 @@
 # Ground Assault — v2 (modular)
 
-A Defender-style arcade game: fly a ship over a wrapping city, shoot the aliens abducting its
-civilians, and try not to level the place yourself. Vanilla ES modules, no build step, no
+A Defender-style arcade game: fly a ship over a wraparound city, shoot the aliens abducting its
+civilians, and try to save the city from being overrun. Vanilla ES modules, no build step, no
 dependencies.
 
-It began as `older/game-v2-ground-assault_X.html`, one 2,162-line inline `<script>`, decomposed into
-ES-module classes with no gameplay, tuning, or art changes at the time of the split — every original
-design comment moved with the code it explains. Features added since (kamikazes, synthesized audio,
-the title screen) arrived in the modular layout. Every gameplay number still comes from
-`src/config.js`.
 
 ## Running it
-
-ES modules are blocked over `file://`, so opening `index.html` by double-clicking it will not work.
-Serve the folder instead:
 
 ```sh
 cd ground-assault
@@ -42,7 +34,7 @@ src/
     Ship.js           flight physics, altitude clamp, burst fire, takeoff/landing glides
     Roamer.js         hunting aliens: descend, transit, dive, capture, depart, tilt, separation
     Bomber.js         zig-zag bombing runs
-    Kamikaze.js       wave-independent rammers: idle/patrol until the player is in range, then commit
+    Kamikaze.js       rammers on their own per-wave release quota: idle/patrol until the player is in range, then commit
     Bomb.js           constant-rate fall, impact damage, blast radius
     Bullet.js         PlayerBullet (comet trail, trail-hit vs head-hit) and EnemyBullet
     FallingCaptive.js dropped captives: fall, ship catch, rooftop/ground drop-off, survivable falls
@@ -112,5 +104,13 @@ at event sites, so no code path can leave one stuck on.
   crowd carry a caption — captioning all twelve buried the explosion behind a wall of text. The yelps
   are individually delayed by a random offset (`CONFIG.fallingCivilian.yelpDelayRandRange`), which is
   what keeps a collapse from firing one chord of twelve, and also what keeps them under the voice cap
-  so each is actually heard.
+  so each is actually heard. Both this and ship-vs-building ramming are Steve's house rules — off by
+  default, on behind `?steve=true` (see below and `Game.steve`).
 - `?wave=N` on the URL starts at that wave, civilian growth included, for testing the late game.
+- `?steve=true` on the URL turns on Steve's house rules: the ship actually collides with buildings
+  when rammed (destroying both, see `Game.shipCrashIntoBuilding`) instead of passing through them
+  harmlessly; any building spills its occupants as `FallingCivilian`s when it collapses, whatever
+  destroyed it; and civilians become a legitimate target for player gunfire, ship or on-foot
+  (`Game.killHumanoid`, `CollisionSystem._bulletsVsHumanoids`). Off by default. Deliberately doesn't
+  extend to the ship's own body touching a civilian — that made protecting/rescuing them nearly
+  impossible, since any low pass over a group killed them.

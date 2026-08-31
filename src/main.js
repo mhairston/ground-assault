@@ -20,11 +20,14 @@ const fitToWindow = () => {
 fitToWindow();
 window.addEventListener('resize', fitToWindow);
 
-const waveParam = new URLSearchParams(window.location.search).get('wave');
-const parsedWave = Number.parseInt(waveParam ?? '', 10);
+const params = new URLSearchParams(window.location.search);
+const parsedWave = Number.parseInt(params.get('wave') ?? '', 10);
 const startWave = Number.isFinite(parsedWave) && parsedWave >= 1 ? parsedWave : 1;
+// Steve's house rules — ship-vs-building ramming and the civilians it (and any other collapse) spills
+// out — are hidden behind ?steve=true rather than on by default. See Game.steve.
+const steve = params.get('steve') === 'true';
 
-const game = new Game(canvas, document, { startWave });
+const game = new Game(canvas, document, { startWave, steve });
 game.start();
 
 // handy for poking at state from the devtools console

@@ -9,14 +9,20 @@ class Fragment {
   // building taking a hit) pass 0/0 and get the original burst-from-rest behavior exactly.
   // life overrides the usual lifeMin..lifeMin+lifeRandRange roll with a fixed duration instead — used
   // by an explosion that needs to visibly linger longer than a normal kill's debris (see
-  // Game.explodeKamikazeWith), without changing how long every OTHER burst in the game lasts
-  constructor(x, y, color, srcVx, srcVy, life = null){
-    const ang = Math.random()*Math.PI*2, spd = 40+Math.random()*100;
+  // Game.explodeKamikazeWith), without changing how long every OTHER burst in the game lasts.
+  // speedMult scales only the fragment's own outward burst (spd and its upward kick) — used to tune
+  // how hard debris throws in every direction relative to a plain kill's burst (see
+  // CONFIG.debris.shipDeathSpeedMult/enemyKillSpeedMult). Deliberately NOT applied to the srcVx/srcVy
+  // share below: Camera.followWreckage derives its drift speed from momentumInherit alone and assumes
+  // the individual bursts still average out to zero across the cloud, which only holds if this scales
+  // the burst, not the inherited share.
+  constructor(x, y, color, srcVx, srcVy, life = null, speedMult = 1){
+    const ang = Math.random()*Math.PI*2, spd = (40+Math.random()*100) * speedMult;
     const spread = CONFIG.debris.momentumSpread;
     const share = CONFIG.debris.momentumInherit * (1 + (Math.random()*2-1)*spread);
     this.x = x; this.y = y;
     this.vx = Math.cos(ang)*spd + srcVx*share;
-    this.vy = Math.sin(ang)*spd - 50 + srcVy*share;
+    this.vy = Math.sin(ang)*spd - 50*speedMult + srcVy*share;
     // maxLife is deliberately NOT always "this frame's own life": in the normal (no override) case
     // it's the fixed top of the whole lifeMin..lifeMin+lifeRandRange roll, so a fragment that happens
     // to roll a short life also starts out already partway faded — that's the existing look for every
@@ -37,10 +43,10 @@ export class DebrisField {
   // explosion is over. One number handed back at spawn time, so a caller can time something to the
   // end of it without holding a reference to the fragments or polling the field (see
   // Camera.followWreckage).
-  spawn(x, y, color, count, srcVx = 0, srcVy = 0, life = null){
+  spawn(x, y, color, count, srcVx = 0, srcVy = 0, life = null, speedMult = 1){
     let longest = 0;
     for(let i=0;i<count;i++){
-      const frag = new Fragment(x, y, color, srcVx, srcVy, life);
+      const frag = new Fragment(x, y, color, srcVx, srcVy, life, speedMult);
       this.items.push(frag);
       longest = Math.max(longest, frag.life);
     }

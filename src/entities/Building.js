@@ -111,19 +111,25 @@ export class Building {
         game.loseHumanoid(h, 'killed');
       }
     }
-    const fallers = Building.occupantsFor(this.width, this.height);
-    // Only a couple of the crowd get a caption, per Mike's request. Taking the first few needs no
-    // shuffle to be a random couple: the x/y below are random, so which of the fallers ends up
-    // captioned is already unrelated to where they come out of the building.
-    const captioned = Math.min(fallers, CONFIG.fallingCivilian.curseCount);
-    // consecutive indices from a random start, so the captions on screen at once are always
-    // different strings rather than occasionally the same one twice — see FallingCivilian's
-    // constructor, which owns the actual list and does the wrapping
-    const firstCurse = Math.floor(Math.random()*1000);
-    for(let i=0;i<fallers;i++){
-      const x = wrapX(this.x - this.width/2 + Math.random()*this.width);
-      const y = this.roofY + 10 + Math.random()*Math.max(10, this.height*0.55);
-      game.spawnFallingCivilian(x, y, { curseIndex: i < captioned ? firstCurse + i : null, srcVx, srcVy });
+    // Civilians spilling out of the collapse is one of Steve's house rules — off by default, on
+    // behind ?steve=true (see Game.steve). With it off, a collapse is still scored, still throws
+    // rubble, and still kills anyone caught standing too close (above) — it just doesn't also eject
+    // the building's occupants.
+    if(game.steve){
+      const fallers = Building.occupantsFor(this.width, this.height);
+      // Only a couple of the crowd get a caption, per Mike's request. Taking the first few needs no
+      // shuffle to be a random couple: the x/y below are random, so which of the fallers ends up
+      // captioned is already unrelated to where they come out of the building.
+      const captioned = Math.min(fallers, CONFIG.fallingCivilian.curseCount);
+      // consecutive indices from a random start, so the captions on screen at once are always
+      // different strings rather than occasionally the same one twice — see FallingCivilian's
+      // constructor, which owns the actual list and does the wrapping
+      const firstCurse = Math.floor(Math.random()*1000);
+      for(let i=0;i<fallers;i++){
+        const x = wrapX(this.x - this.width/2 + Math.random()*this.width);
+        const y = this.roofY + 10 + Math.random()*Math.max(10, this.height*0.55);
+        game.spawnFallingCivilian(x, y, { curseIndex: i < captioned ? firstCurse + i : null, srcVx, srcVy });
+      }
     }
     // if the player was on/climbing this building when it came down, drop them to the ground
     game.pilot.dropFrom(this);

@@ -42,11 +42,15 @@ export class Bomber {
   // restart resets it along with everything else
   static updateAll(bombers, dt, game){
     game.bomberRespawn -= dt;
-    // don't start appearing until minWave, per Mike's request — the timer still counts down underneath
-    // regardless, so one can appear right away once that wave actually starts rather than needing a
-    // full fresh cycle first
-    if(game.waves.number >= CONFIG.bomber.minWave && game.bomberRespawn <= 0 && bombers.filter(bo=>bo.alive).length < CONFIG.bomber.maxAlive){
+    const waves = game.waves;
+    // gated on the current wave's release quota (WaveManager.bomberQuotaFor) rather than a flat
+    // minWave check — the quota is already 0 before minWave, so this alone keeps bombers out until
+    // then, and also caps how many a single wave releases in total instead of trickling forever. The
+    // timer still counts down underneath regardless of quota, so one can appear right away once a new
+    // wave actually opens up room rather than needing a full fresh cycle first.
+    if(game.bomberRespawn <= 0 && bombers.filter(bo=>bo.alive).length < CONFIG.bomber.maxAlive && waves.bomberSpawned < waves.bomberQuota){
       Bomber.spawn(game);
+      waves.recordBomberSpawned();
       game.bomberRespawn = CONFIG.bomber.respawnTimerBase + Math.random()*CONFIG.bomber.respawnTimerRandRange;
     }
     for(const bo of bombers){

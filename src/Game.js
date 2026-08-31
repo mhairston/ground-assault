@@ -30,11 +30,18 @@ import { SoundManager } from './audio/SoundManager.js';
 // a single kind of thing lives on that class; what lives here is the wiring: tick order, the
 // cross-cutting choke points (score, civilian losses, life loss), and the mode transitions.
 export class Game {
-  constructor(canvas, doc = document, { startWave = 1 } = {}){
+  constructor(canvas, doc = document, { startWave = 1, steve = false } = {}){
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.hud = new Hud(doc);
     this.highScores = new HighScores();
+    // Steve's house rules, per ?steve=true on the URL (see main.js) — off by default. Gates: the ship
+    // actually colliding with buildings when rammed (see CollisionSystem._shipVsWorld/RAM crash path);
+    // any building spilling FallingCivilians when it collapses, whatever destroyed it (see Building.
+    // collapse); and civilians becoming a legitimate target for player gunfire (CollisionSystem.
+    // _bulletsVsHumanoids). Deliberately does NOT make civilians vulnerable to the ship's own body —
+    // see Game.killHumanoid's comment for why.
+    this.steve = steve;
 
     this.shipPad = { x: CONFIG.shipPad.x, y: GROUND_Y };
     this.pilot = new Pilot(wrapX(this.shipPad.x - CONFIG.pilot.startOffsetFromShip));
@@ -186,8 +193,9 @@ export class Game {
   // bomb impacts, ground explosions. life: an explicit fixed fragment lifetime overriding the usual
   // random roll, for an explosion that needs to visibly linger (see Game.explodeKamikazeWith) —
   // omitted everywhere else.
-  // returns when this explosion will be over (see DebrisField.spawn) — ignored by most callers
-  spawnDebris(x, y, color, count, srcVx = 0, srcVy = 0, life = null){ return this.debris.spawn(x, y, color, count, srcVx, srcVy, life); }
+  // returns when this explosion will be over (see DebrisField.spawn) — ignored by most callers.
+  // speedMult: see Fragment — only ship-destruction callers pass one.
+  spawnDebris(x, y, color, count, srcVx = 0, srcVy = 0, life = null, speedMult = 1){ return this.debris.spawn(x, y, color, count, srcVx, srcVy, life, speedMult); }
 
   spawnFallingCaptive(x, y){ this.fallingCaptives.push(new FallingCaptive(x, y)); }
   spawnFallingCivilian(x, y, opts){ this.fallingCivilians.push(new FallingCivilian(x, y, opts)); }
@@ -203,12 +211,26 @@ export class Game {
     else this.waves.recordCivDeath();
   }
 
+  // Steve's house rules only — civilians are otherwise never a valid target for player gunfire (see
+  // CollisionSystem._bulletsVsHumanoids and game.steve). Deliberately NOT wired up for the ship's own
+  // body touching a civilian, even though it would be the same shape as killRoamer/killBomber/
+  // killKamikaze — that made protecting/rescuing civilians nearly impossible (any low pass over a
+  // group killed them), per Mike's request.
+  killHumanoid(h){
+    h.alive = false;
+    this.spawnDebris(h.x, h.topY + CONFIG.humanoid.height/2, '#ffd76b', CONFIG.debris.humanoidKillCount);
+    this.loseHumanoid(h, 'killed');
+  }
+
   // one destroy path for roamers and one for bombers, shared by bullet kills and ram kills so the
-  // score, debris, wave accounting and captive-drop can't drift apart between them
+  // score, debris, wave accounting and captive-drop can't drift apart between them. Debris count/
+  // speed multiplied by CONFIG.debris.enemyKillCountMult/enemyKillSpeedMult — same "twice the debris,
+  // 8x the burst speed" treatment the ship's own death gets, per Mike's request.
   killRoamer(r){
     r.alive = false;
     this.addScore(CONFIG.scoring.perRoamerKilled); // a ramming kill counts the same as a shot-down one
-    this.spawnDebris(r.x, r.y, '#c98bff', CONFIG.debris.enemyKillCount, r.vx, r.vy); // doubled, per Mike's request for more debris when enemies are destroyed
+    const d = CONFIG.debris;
+    this.spawnDebris(r.x, r.y, '#c98bff', d.enemyKillCount * d.enemyKillCountMult, r.vx, r.vy, null, d.enemyKillSpeedMult);
     this.sound.play('roamerDeath', { x: r.x });
     this.waves.recordEnemyDestroyed();
     if(r.carrying) this.spawnFallingCaptive(r.x, r.y);
@@ -217,7 +239,8 @@ export class Game {
   killBomber(bo){
     bo.alive = false;
     this.addScore(CONFIG.scoring.perBomberKilled);
-    this.spawnDebris(bo.x, bo.y, '#ff8a4d', CONFIG.debris.enemyKillCount, bo.vx, bo.vy);
+    const d = CONFIG.debris;
+    this.spawnDebris(bo.x, bo.y, '#ff8a4d', d.enemyKillCount * d.enemyKillCountMult, bo.vx, bo.vy, null, d.enemyKillSpeedMult);
     this.sound.play('bomberDeath', { x: bo.x });
     this.waves.recordEnemyDestroyed();
   }
@@ -225,7 +248,8 @@ export class Game {
   killKamikaze(k){
     k.alive = false;
     this.addScore(CONFIG.scoring.perKamikazeKilled);
-    this.spawnDebris(k.x, k.y, '#ff3b3b', CONFIG.debris.enemyKillCount, k.vx, k.vy);
+    const d = CONFIG.debris;
+    this.spawnDebris(k.x, k.y, '#ff3b3b', d.enemyKillCount * d.enemyKillCountMult, k.vx, k.vy, null, d.enemyKillSpeedMult);
     this.sound.play('kamikazeDeath', { x: k.x });
     this.waves.recordEnemyDestroyed();
   }
@@ -283,26 +307,9 @@ export class Game {
     this.loseLife();
   }
 
-  // Ship-vs-building impact: the biggest explosion in the game, and the only one that takes both
-  // parties with it outright, per Mike's request. The building COLLAPSES rather than merely taking a
-  // hit — which is what puts its occupants in the air (see Building.collapse -> occupantsFor: 4-12
-  // civilians tumbling out and cursing) and charges the player for the building on top of the ship.
-  //
-  // Everything thrown by the crash carries a share of the ship's momentum, per Mike's request: the
-  // fireball, the building's own rubble, and the people. Before that, only the fireball did, so a
-  // ship at full speed sheeted its own wreckage across the street while the building it had just
-  // demolished dropped its rubble straight down — one impact that looked like two unrelated events.
-  // The share and its per-item variation are debris.momentumInherit/momentumSpread, the same
-  // constants every other explosion in the game inherits momentum with.
-  //
-  // The sequence plays at normal speed, per Mike's request. Order matters here:
-  //   - the crash fireball goes up first, with an explicit fragment lifetime so it burns for exactly
-  //     as long as the spectacle lasts instead of guttering out halfway through it;
-  //   - then the building comes down, so its own debris and fallers layer on top of the fireball;
-  //   - then loseLife, which adds the ship's own death cloud and starts the overlay countdown.
   shipCrashIntoBuilding(bld){
-    const c = CONFIG.building, ship = this.ship;
-    this.spawnDebris(ship.x, ship.y, '#ffe08a', c.shipCrashDebris, ship.vx, ship.vy, c.shipCrashAnimDuration);
+    const c = CONFIG.building, ship = this.ship, d = CONFIG.debris;
+    this.spawnDebris(ship.x, ship.y, '#ffe08a', c.shipCrashDebris * d.shipDeathCountMult, ship.vx, ship.vy, c.shipCrashAnimDuration, d.shipDeathSpeedMult);
     this.sound.play('shipCrash', { x: ship.x });
     bld.collapse(this, ship.vx, ship.vy);
     // Both overlay paths (RespawnSequence's debris stage, and gameOverDisplayTimer) already build in
@@ -471,21 +478,27 @@ export class Game {
       this.sound.play('gameOver');
       this.sound.stopMusic(CONFIG.audio.music.gameOverFade);
       this.sound.stopAllLoops();
+      // ship/pilot destruction (with _destroyShip's own explosion cue, see below) still has to happen
+      // before locking, same reasoning as gameOver/stopMusic above — sound.play is a silent no-op once
+      // locked, and the ship should still go out with a bang on the final life same as any other
+      if(this.mode==='flight'){ this._destroyShip(CONFIG.debris.shipFinalDeathCount); }
+      else if(this.mode==='foot'){ this.spawnDebris(this.pilot.x, this.pilot.midY, '#ff8b5e', CONFIG.debris.footFinalDeathCount); this.pilot.hidden = true; }
       // per Mike's request: all audio stops until the game is restarted. The world keeps simulating
       // after GAME OVER (bombs still land, roamers still die), which otherwise kept triggering fresh
       // sounds and ambient loops right through the GAME OVER screen. Set after the sounds above, so
-      // the stinger and the music's fade-out are still heard rather than cut off mid-note.
+      // the stinger, the music's fade-out, and the ship's own explosion are still heard rather than cut
+      // off mid-note.
       this.sound.locked = true;
-      if(this.mode==='flight'){ this._destroyShip(CONFIG.debris.shipFinalDeathCount); }
-      else if(this.mode==='foot'){ this.spawnDebris(this.pilot.x, this.pilot.midY, '#ff8b5e', CONFIG.debris.footFinalDeathCount); this.pilot.hidden = true; }
       return;
     }
-    this.sound.play('shipLost');
     // hide the destroyed ship/player and let the explosion play out — the next life doesn't actually
-    // start (see finishRespawn) until the debris has finished and the "lives left" pause has elapsed
+    // start (see finishRespawn) until the debris has finished and the "lives left" pause has elapsed.
+    // _destroyShip supplies its own explosion sound (see below); the on-foot pilot has no equivalent
+    // boom, so it keeps the little shipLost cue as its only life-loss sound.
     if(this.mode==='flight'){
       this._destroyShip(CONFIG.debris.shipDeathCount);
     } else if(this.mode==='foot'){
+      this.sound.play('shipLost');
       this.spawnDebris(this.pilot.x, this.pilot.midY, '#ff8b5e', CONFIG.debris.footDeathCount);
       this.pilot.hidden = true;
     }
@@ -495,8 +508,16 @@ export class Game {
   // shared by the final death and the ordinary one so they can't drift apart: blow the ship up with
   // its own momentum behind the debris, then hand that exact cloud to the camera to follow while it
   // burns out (see Camera.trackDebris) — there's nothing else left to watch until the next life.
+  // Every way the ship dies — ramming a roamer/bomber/kamikaze/building, or just getting shot down —
+  // funnels through here (shipCrashIntoBuilding fires its own separate burst first, then this), so
+  // the count/speed scaling from CONFIG.debris.shipDeath*Mult (see Fragment) covers all of them by
+  // covering this one spot, per Mike's request. Same reasoning for the sound: the ship going
+  // down gets the same explosion cue a building does (buildingCollapse) rather than the old, much
+  // smaller shipLost jingle — per Mike's request that it actually sound like a boom.
   _destroyShip(debrisCount){
-    const cloudLife = this.spawnDebris(this.ship.x, this.ship.y, '#ffe08a', debrisCount, this.ship.vx, this.ship.vy);
+    const d = CONFIG.debris;
+    const cloudLife = this.spawnDebris(this.ship.x, this.ship.y, '#ffe08a', debrisCount * d.shipDeathCountMult, this.ship.vx, this.ship.vy, null, d.shipDeathSpeedMult);
+    this.sound.play('buildingCollapse', { x: this.ship.x });
     this.camera.followWreckage(this.ship.vx, cloudLife); // the wreck is the only thing left worth watching
     this.ship.alive = false;
   }
@@ -535,6 +556,14 @@ export class Game {
     // nothing runs at all until the title screen is dismissed (see onP) — the world just sits at
     // whatever reset() left it, per Mike's request for a "press P to start" title screen
     if(this.titleScreen) return;
+    // The world genuinely freezes while the WAVE COMPLETE banner is up, per Mike's request — nothing
+    // moves, nothing spawns, nothing fires, right underneath it, rather than continuing to play out
+    // unseen behind the overlay. Only the banner's own countdown keeps running (updateTransition is a
+    // no-op unless waves.complete anyway, so calling it here instead of below changes nothing once the
+    // freeze ends). Skipped if the game is actually over: the GAME OVER overlay takes over instead
+    // (see Renderer.drawWaveComplete, which hides the WAVE COMPLETE banner once gameOver is true), and
+    // the world deliberately keeps running through THAT one — see the gameOver branch just below.
+    if(this.waves.complete && !this.gameOver){ this.waves.updateTransition(dt); return; }
     // the world doesn't pause just because the player did — roamers keep hunting/departing, bombs
     // keep falling, pickups keep spawning, right through the death explosion and "SHIP LOST"
     // overlay, AND right through the final death into GAME OVER too. Only the player's own input
@@ -552,7 +581,6 @@ export class Game {
     this.bombers = Bomber.updateAll(this.bombers, dt, this);
     this.kamikazes = Kamikaze.updateAll(this.kamikazes, dt, this);
     Humanoid.updateAll(this.humanoids, dt, this);
-    this.waves.updateTransition(dt);
     this.bombs = Bomb.updateAll(this.bombs, dt, this);
     this.pickups.update(dt, this);
     if(this.superbombFlash > 0) this.superbombFlash -= dt;

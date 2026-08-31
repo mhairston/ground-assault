@@ -51,29 +51,37 @@ export class FallingCaptive {
   _ride(game, carrying){
     const ship = game.ship;
     this.x = ship.x; this.y = ship.y + 14;
+    // The ship carrying a captive can be destroyed mid-ride — rammed by an enemy, shot down, or (in
+    // Steve's house rules) crashed into a building — same as at any other moment in flight. Per Mike's
+    // request, the captive doesn't just hang there frozen at the wreck's position forever: they go
+    // down with the ship right then, the same splat _land() gives a captive that falls too far to
+    // survive. game.mode!=='flight' is covered too, defensively, for the same reason — whatever the
+    // cause, a ship that isn't there to carry them any more means the ride is over.
+    if(!ship.alive || game.mode !== 'flight'){
+      this.lost = true;
+      game.spawnDebris(this.x, this.y, '#ffd76b', CONFIG.captive.debrisOnLost);
+      return false;
+    }
     // The ship "drops off" a carried captive once its altitude is close to whatever landable surface
     // is directly below/at it right now — landingSurfaceAt already finds the ground OR a rooftop
     // (whichever is closest to the ship's CURRENT y, at that x), same as the ship's own landing check
     // uses, so this works over ANY rooftop rather than only ones whose height happened to coincide
     // with the ship's minimum flight altitude. Deliberately no speed check (unlike actual landing),
     // per Mike's request that a drop-off work at any speed.
-    if(game.mode==='flight' && ship.alive){
-      const surf = game.landingSurfaceAt(ship.x, ship.y);
-      if(surf.dist >= CONFIG.captive.dropDist) return carrying;
-      const onRoof = !!surf.roofRef;
-      const h = new Humanoid(this.x);
-      if(onRoof){ h.roofRef = surf.roofRef; h.roofSettleTimer = CONFIG.captive.roofSettleMin + Math.random()*CONFIG.captive.roofSettleRandRange; }
-      // three quick blinks instead of a debris burst when a captive is safely returned, per Mike's
-      // request — this isn't an explosion, just a "they're back" flash (see Humanoid.draw)
-      h.blinkTimer = CONFIG.captive.blinkDuration;
-      game.humanoids.push(h);
-      game.addScore(CONFIG.captive.scoreOnRescue);
-      game.sound.play('civilianRescued');
-      game.waves.recordCivRescue();
-      this.rescued = true;
-      return false;
-    }
-    return carrying;
+    const surf = game.landingSurfaceAt(ship.x, ship.y);
+    if(surf.dist >= CONFIG.captive.dropDist) return carrying;
+    const onRoof = !!surf.roofRef;
+    const h = new Humanoid(this.x);
+    if(onRoof){ h.roofRef = surf.roofRef; h.roofSettleTimer = CONFIG.captive.roofSettleMin + Math.random()*CONFIG.captive.roofSettleRandRange; }
+    // three quick blinks instead of a debris burst when a captive is safely returned, per Mike's
+    // request — this isn't an explosion, just a "they're back" flash (see Humanoid.draw)
+    h.blinkTimer = CONFIG.captive.blinkDuration;
+    game.humanoids.push(h);
+    game.addScore(CONFIG.captive.scoreOnRescue);
+    game.sound.play('civilianRescued');
+    game.waves.recordCivRescue();
+    this.rescued = true;
+    return false;
   }
 
   _land(game){

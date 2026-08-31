@@ -70,17 +70,17 @@ export const CONFIG = {
     shipCrashAnimDuration: 2.4,
     // ...then this long a beat of stillness, per Mike's request, before SHIP LOST / GAME OVER.
     shipCrashOverlayPause: 2,
-    // Visual-only civilians that tumble out of a collapsing building, cursing. This is the
-    // building's occupancy: 4-12 of them depending on how big it is, per Mike's request. Scaled on
-    // footprint area against the same reference building Building.hpFor uses, so the biggest tower
-    // in the default city is full and the smallest house is nearly empty. See Building.occupantsFor.
+    // Visual-only civilians that tumble out of a collapsing building, cursing — one of Steve's house
+    // rules, off by default, on behind ?steve=true (see Game.steve). This is the building's
+    // occupancy: 4-12 of them depending on how big it is, per Mike's request. Scaled on footprint
+    // area against the same reference building Building.hpFor uses, so the biggest tower in the
+    // default city is full and the smallest house is nearly empty. See Building.occupantsFor.
     collapseFallerMin: 4,
     collapseFallerMax: 12,
     // footprint area (w*h) at which a building is considered fully occupied, i.e. hits
     // collapseFallerMax. 19200 is the default city's largest building, the 80x240 tower.
     fullOccupancyArea: 19200,
     humanDeathRadiusPastEdge: 30,     // how far past a destroyed building's footprint a human still dies
-    ramDamagesBuildingsDefault: true, // see RAM_DAMAGES_BUILDINGS
     ramTolXPastEdge: 12, ramTolYAboveRoof: 6, ramTolYBelowGround: 4,
   },
   shipPad: { x: 60 },
@@ -164,6 +164,11 @@ export const CONFIG = {
     // NB: the blink-on-rescue duration and the rooftop settle timer live on `captive` — they only
     // ever apply to a humanoid that has just been dropped or rescued, and that code reads them from
     // there. Duplicates of them sat here unread for a while; don't re-add them.
+    // Steve's house rules only — civilians aren't a legitimate player-bullet target otherwise (see
+    // Game.steve, CollisionSystem._bulletsVsHumanoids). A humanoid is drawn as an 8px-wide, 20px-tall
+    // (height, above) body, so these sit close to that rather than needing their own tuned feel like
+    // an enemy's tolerances do.
+    bulletTolX: 6, bulletTolY: 12,
   },
   roamer: {
     // 30% larger than the original 20x13 triangle, per Mike's request. Roamer.draw expresses its
@@ -236,6 +241,14 @@ export const CONFIG = {
     w: 28, h: 12,
     maxAlive: 3,
     minWave: 5, // doesn't start appearing until wave 5, per Mike's request
+    // How many bombers a single wave releases in total, mirroring the roamer wave-quota system
+    // (wave.baseQuota/quotaPerWave/quotaCap) rather than the old unbounded trickle — see
+    // WaveManager.bomberQuotaFor. Counted from this type's own first wave (minWave), so minWave itself
+    // gets waveBaseQuota and every wave after adds waveQuotaPerWave more, capped at waveQuotaCap.
+    // maxAlive above still caps how many can be alive at once, same as it always has — this only
+    // bounds the running total released across the wave. Starting numbers, not yet confirmed against
+    // playtesting — tune to taste.
+    waveBaseQuota: 3, waveQuotaPerWave: 1, waveQuotaCap: 30,
     hp: 2, // per Mike's request — a bomber survives one hit (bullet or ram) and goes down on the second
     initialRespawnTimer: 6,
     respawnTimerBase: 8, respawnTimerRandRange: 6,
@@ -254,13 +267,18 @@ export const CONFIG = {
     bulletTolX: 12, bulletTolY: 20,
   },
   // A new enemy type, per Mike's request: idles/patrols until the player's ship comes within
-  // triggerRange, then commits fully to closing the distance and ramming it. Wave-independent, same
-  // footing as bombers — no per-wave quota, just a persistent threat that keeps trickling in.
+  // triggerRange, then commits fully to closing the distance and ramming it. Same footing as bombers:
+  // a per-wave release quota (see waveBaseQuota below) rather than gating wave completion the way a
+  // roamer's quota does — killing every kamikaze a wave releases isn't required to clear it.
   kamikaze: {
     w: 22, h: 14,
     hp: 1, // one hit and it's down — dangerous up close, fragile at range
     maxAlive: 2,
     minWave: 3, // doesn't start appearing until wave 3, per Mike's request
+    // How many kamikazes a single wave releases in total — see bomber.waveBaseQuota above for the
+    // full explanation, WaveManager.kamikazeQuotaFor for the formula. Starting numbers, not yet
+    // confirmed against playtesting — tune to taste.
+    waveBaseQuota: 2, waveQuotaPerWave: 1, waveQuotaCap: 20,
     initialRespawnTimer: 10,
     respawnTimerBase: 14, respawnTimerRandRange: 10,
     spawnYBase: -20, spawnYRandRange: 80,
@@ -294,46 +312,18 @@ export const CONFIG = {
     maxGroundScorches: 150,
     debrisOnExplode: 50,
   },
-  // Visual-only civilians thrown clear of a collapsing building (see entities/FallingCivilian.js).
-  // How many there are is the building's business — that's its occupancy, building.collapseFallerMin/
-  // Max — so what lives here is only what they do on the way down.
   fallingCivilian: {
-    // Only a couple of them show a curse, per Mike's request. Every one captioned put a wall of text
-    // over the explosion and made the individual figures impossible to pick out; the rest still fall
-    // and still yelp, they just do it quietly. Building.collapse spawns them at random positions, so
-    // the couple that get a caption are already a random couple of the crowd.
+
     curseCount: 2,
-    curseFontPx: 18, // up from 10, per Mike's request — the one font size that isn't a draw-method
-                     // literal, because at this size it has to be checked against the clearance the
-                     // caption is drawn at (see FallingCivilian.draw)
-    // Each one lets out the same cry a civilian gives when a roamer grabs them, per Mike's request,
-    // held off by a random delay in this window so a collapse scatters them rather than firing one
-    // chord of twelve. Counted in game time like everything else, so a slow-motion ship crash
-    // stretches the scatter out in real time too, which is exactly where it's most audible.
-    //
-    // The window is also what keeps the voice cap off them. Twelve 0.26s cries inside 0.9s pile up
-    // past civilianYelp's concurrency limit often enough to swallow one in most collapses, which
-    // would quietly break the "each of them yelps" part of the request; 1.2s drops that to about one
-    // collapse in ten losing a single cry. Widening it further trades against the fall itself — much
-    // past this and fallers off a low roof are landing before their turn comes (they yelp on impact
-    // instead, see FallingCivilian._yelp, but that is a cluster rather than a scatter).
+    curseFontPx: 18,
+
     yelpDelayMin: 0.05, yelpDelayRandRange: 1.2,
-    // tumbling end over end as they fall, per Mike's request. Radians/sec; the direction is
-    // randomised per faller, so a crowd doesn't rotate as one.
     spinMin: 2.2, spinRandRange: 4.5,
   },
   captive: {
-    // falls from rest and accelerates, per Mike's request (previously a flat 70px/s) — tuned gentler
-    // than debris.gravity (220): a released captive drifts into the fall rather than dropping like a
-    // fragment blown off an explosion.
     fallGravity: 120,
     catchTolX: 20, catchTolY: 20,
     surviveStoryHeight: 25, surviveStories: 2,
-    // how close the ship's altitude has to be to a landable surface's own height to drop a rescued
-    // captive off there, per Mike's request that this work over ANY rooftop (not just ones whose
-    // height happened to match the ship's minimum flight altitude) and at any speed — see
-    // FallingCaptive._ride, which reads this the same way Game.landingSurfaceAt's dist already does
-    // for the ship's own landing, just without that check's speed requirement
     dropDist: 40,
     roofSettleMin: 2, roofSettleRandRange: 2,
     debrisOnLost: 6,
@@ -359,8 +349,7 @@ export const CONFIG = {
     respawnTimerBase: 10, respawnTimerRandRange: 12,
     collectDist: 10,
     flashDuration: 0.35,
-    hoverHeight: 16, // how far above the rooftop surface a pickup floats — raised from 7, per Mike's
-                      // request for more visual separation between the rooftop and the item sitting on it
+    hoverHeight: 16,
   },
   scoring: {
     // split per enemy type, per Mike's request — previously one flat perEnemyKilled covered both.
@@ -383,7 +372,7 @@ export const CONFIG = {
     // apart instead of drifting as one rigid block. Only the sources that actually have a velocity
     // pass one (ship, roamers, bombers) — building hits, bomb blasts and ground impacts still burst
     // from rest, which is what they physically do.
-    momentumInherit: 0.7, momentumSpread: 0.25,
+    momentumInherit: 0.3, momentumSpread: 0.25,
     // air drag: the fraction of its velocity a fragment retains per second, applied to the burst and
     // the inherited momentum alike, so debris slows gradually instead of coasting flat-out for its
     // whole life. Applied as pow(drag, dt) so the decay is identical at any frame rate or sim speed.
@@ -396,11 +385,32 @@ export const CONFIG = {
     // each read from its own section. Dead copies of those three sat here and had already drifted
     // out of step with the live values, so don't re-add them.
     enemyKillCount: 16,
+    // Same treatment as the ship's own death below — an enemy's ordinary kill burst (killRoamer/
+    // killBomber/killKamikaze) throws twice the usual debris, flying out 8x as fast, per Mike's
+    // request. NOT applied to the kamikaze-vs-anything collision explosions (kamikaze.
+    // collisionDebrisCount) — those already have their own bigger, longer-tuned burst.
+    enemyKillCountMult: 2,
+    enemyKillSpeedMult: 8,
     shipDeathCount: 28,
     shipFinalDeathCount: 16,
+    // Every way the ship itself dies — ramming a roamer/bomber/kamikaze/building, or getting shot
+    // down — throws 3x the usual debris, flying out at only 0.75x the usual burst speed (a fuller but
+    // gentler-looking cloud than a plain enemy kill gets), per Mike's request. Applied once, in Game.
+    // _destroyShip (and to the ship-vs-building fireball in shipCrashIntoBuilding, which fires its own
+    // separate burst before _destroyShip's), on top of shipDeathCount/shipFinalDeathCount/building.
+    // shipCrashDebris rather than baked into those numbers directly, so the base counts stay the
+    // reference point for an "ordinary" burst. shipDeathSpeedMult only scales each fragment's own
+    // outward burst (see Fragment) — it deliberately leaves momentumInherit/momentumSpread alone,
+    // since Camera.followWreckage derives its drift speed from momentumInherit alone and would desync
+    // from the cloud if this scaled that too.
+    shipDeathCountMult: 3,
+    shipDeathSpeedMult: 0.75,
     footDeathCount: 14,
     footFinalDeathCount: 16,
     fireSuppressantCount: 5,
+    // Steve's house rules only — a civilian shot dead (see Game.killHumanoid). Modest, since it's a
+    // small, single target rather than a vehicle or a building.
+    humanoidKillCount: 10,
   },
   respawn: {
     debrisStageDuration: 0.9,
@@ -534,12 +544,6 @@ export const BUILDING_STYLES = {
   tenement:  { base:[46,58,52],  window:[118,148,110], accent:[150,178,130] },
   house:     { base:[70,48,38],  window:[210,190,130], accent:[150,90,60] },
 };
-
-// config: whether flying the ship into a building is a collision at all. On (the default), the crash
-// destroys BOTH of them in the game's biggest explosion — see Game.shipCrashIntoBuilding. Flip to
-// false and the ship simply passes in front of/through buildings unharmed, with the whole crash path
-// in CollisionSystem._shipVsWorld skipped; the logic is kept intact behind this flag either way.
-export const RAM_DAMAGES_BUILDINGS = CONFIG.building.ramDamagesBuildingsDefault;
 
 // config: whether walking through a building's door drops the player into the little interior demo
 // room. Disabled per Mike's request ("disable the building-interior function for now") — the

@@ -21,12 +21,30 @@ export class WaveManager {
   static word(n){ return WAVE_WORDS[n] || String(n); }
   static quotaFor(wave){ return Math.min(CONFIG.wave.baseQuota + CONFIG.wave.quotaPerWave*(wave-1), CONFIG.wave.quotaCap); }
   static releaseRateFor(wave){ return Math.min(CONFIG.wave.releaseRateCap, Math.round(CONFIG.wave.releaseRateBase + (wave-1)/CONFIG.wave.releaseRateDivisor)); }
+  // How many bombers/kamikazes THIS wave releases in total — same shape as quotaFor above, just
+  // counted from each type's own first wave (minWave) rather than from wave 1, and zero before that
+  // wave arrives. See Bomber.updateAll/Kamikaze.updateAll, which gate spawning on spawned < quota the
+  // same way releaseRoamers gates on this.spawned < this.quota.
+  static bomberQuotaFor(wave){
+    const c = CONFIG.bomber;
+    if(wave < c.minWave) return 0;
+    return Math.min(c.waveBaseQuota + c.waveQuotaPerWave*(wave-c.minWave), c.waveQuotaCap);
+  }
+  static kamikazeQuotaFor(wave){
+    const c = CONFIG.kamikaze;
+    if(wave < c.minWave) return 0;
+    return Math.min(c.waveBaseQuota + c.waveQuotaPerWave*(wave-c.minWave), c.waveQuotaCap);
+  }
 
   reset(startWave = 1){
     this.number = Math.max(1, Math.floor(startWave));
     this.quota = WaveManager.quotaFor(this.number);
     this.spawned = 0;
     this.resolved = 0;
+    this.bomberQuota = WaveManager.bomberQuotaFor(this.number);
+    this.bomberSpawned = 0;
+    this.kamikazeQuota = WaveManager.kamikazeQuotaFor(this.number);
+    this.kamikazeSpawned = 0;
     this.complete = false;
     this.completeTimer = 0;
     this.statsToShow = null;
@@ -68,6 +86,10 @@ export class WaveManager {
   // flags alive=false and lets the next Roamer.updateAll pass count/filter it) — so that path has to
   // credit the resolved count itself, or a superbombed wave could never register as cleared.
   recordResolved(n){ if(!this.complete) this.resolved += n; }
+  // bombers/kamikazes don't gate wave completion (see the kamikaze CONFIG comment) so these just
+  // count against the current wave's release quota — no "resolved" counterpart needed.
+  recordBomberSpawned(){ this.bomberSpawned++; }
+  recordKamikazeSpawned(){ this.kamikazeSpawned++; }
 
   releaseRoamers(){
     // capped at CONFIG.roamer.maxAlive concurrently alive, per Mike's request — if the population's
@@ -107,10 +129,12 @@ export class WaveManager {
     this.complete = true;
     this.statsToShow = { number: this.number, deaths: this.civDeaths, abductions: this.civAbductions, destroyed: this.enemiesDestroyed, rescues: this.civRescues };
     this.completeTimer = CONFIG.wave.completeOverlayDuration;
-    // invulnerable for exactly as long as the WAVE COMPLETE banner is up, per Mike's request — the
-    // world keeps running underneath it (roamers still hunt, bombs still fall), so without this a
-    // player could get blindsided while looking at their own congratulations screen. Math.max rather
-    // than a flat assignment, in case a respawn's own (shorter) invuln window is still ticking down.
+    // Invulnerable for exactly as long as the WAVE COMPLETE banner is up. The world itself now freezes
+    // solid for that same stretch (see Game.update), so nothing can actually touch the player during
+    // it any more — this is a belt-and-suspenders leftover from when it didn't, kept so a bomb or
+    // enemy bullet already in flight the instant the freeze begins can't land a hit on the very frame
+    // it triggers. Math.max rather than a flat assignment, in case a respawn's own (shorter) invuln
+    // window is still ticking down.
     this.game.ship.invuln = Math.max(this.game.ship.invuln, this.completeTimer);
     this.game.pilot.invuln = Math.max(this.game.pilot.invuln, this.completeTimer);
     // flat per-wave bonus (Mike specified 500 for wave one; no growth formula was given, so every
@@ -139,6 +163,10 @@ export class WaveManager {
     this.game.sound.setMusicWave(this.number);
     this.quota = WaveManager.quotaFor(this.number);
     this.spawned = 0; this.resolved = 0;
+    this.bomberQuota = WaveManager.bomberQuotaFor(this.number);
+    this.bomberSpawned = 0;
+    this.kamikazeQuota = WaveManager.kamikazeQuotaFor(this.number);
+    this.kamikazeSpawned = 0;
     this.civDeaths = 0; this.civAbductions = 0; this.civRescues = 0; this.enemiesDestroyed = 0;
     this.complete = false; this.statsToShow = null;
     // the civilian pool grows every wave — 3 more join the world each time a new wave starts, per

@@ -35,11 +35,12 @@ export class Kamikaze {
   // restart resets it along with everything else
   static updateAll(kamikazes, dt, game){
     game.kamikazeRespawn -= dt;
-    // don't start appearing until minWave, per Mike's request — the timer still counts down underneath
-    // regardless, so one can appear right away once that wave actually starts rather than needing a
-    // full fresh cycle first
-    if(game.waves.number >= CONFIG.kamikaze.minWave && game.kamikazeRespawn <= 0 && kamikazes.filter(k=>k.alive).length < CONFIG.kamikaze.maxAlive){
+    const waves = game.waves;
+    // gated on the current wave's release quota (WaveManager.kamikazeQuotaFor) rather than a flat
+    // minWave check — see Bomber.updateAll's identical comment for the full reasoning.
+    if(game.kamikazeRespawn <= 0 && kamikazes.filter(k=>k.alive).length < CONFIG.kamikaze.maxAlive && waves.kamikazeSpawned < waves.kamikazeQuota){
       Kamikaze.spawn(game);
+      waves.recordKamikazeSpawned();
       game.kamikazeRespawn = CONFIG.kamikaze.respawnTimerBase + Math.random()*CONFIG.kamikaze.respawnTimerRandRange;
     }
     for(const k of kamikazes){

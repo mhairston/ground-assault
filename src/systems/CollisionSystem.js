@@ -1,4 +1,4 @@
-import { CONFIG, GROUND_Y, RAM_DAMAGES_BUILDINGS } from '../config.js';
+import { CONFIG, GROUND_Y } from '../config.js';
 import { wrapDelta } from '../core/geometry.js';
 
 // Everything that resolves one thing hitting another, run once per tick after all the movement
@@ -15,6 +15,9 @@ export class CollisionSystem {
     this._bulletsVsKamikazes(game);
     this._kamikazesVsEnemies(game);
     this._kamikazesVsBuildings(game);
+    // civilians as a legitimate player-bullet target is one of Steve's house rules, off by default —
+    // see game.steve and Game.killHumanoid.
+    if(game.steve) this._bulletsVsHumanoids(game);
     // player gunfire no longer damages buildings — it just passes through them harmlessly. The only
     // way to damage a building yourself is by ramming it with the ship (see _shipVsWorld).
     game.playerBullets = game.playerBullets.filter(b=>!b.dead);
@@ -116,6 +119,24 @@ export class CollisionSystem {
     game.kamikazes = game.kamikazes.filter(k=>k.alive);
   }
 
+  // Steve's house rules only (see run()): a civilian caught in player gunfire — either the ship's own
+  // fire or the on-foot pilot's footLaser, both of which land in game.playerBullets — dies just like
+  // any other target. Same treatment every other bullet-vs-enemy check here gets: head-only hit test,
+  // and the bullet is spent on the first thing it hits.
+  _bulletsVsHumanoids(game){
+    for(const h of game.humanoids){
+      if(!h.alive) continue;
+      const midY = h.topY + CONFIG.humanoid.height/2;
+      for(const b of game.playerBullets){
+        if(b.dead) continue;
+        if(b.headHit(h.x, midY, CONFIG.humanoid.bulletTolX, CONFIG.humanoid.bulletTolY)){
+          b.dead = true;
+          game.killHumanoid(h);
+        }
+      }
+    }
+  }
+
   // A kamikaze that touches ANY other enemy — a roamer, a bomber, or another kamikaze — detonates,
   // taking both out in one big blast (see Game.explodeKamikazeWith), per Mike's request: originally
   // just kamikaze-vs-kamikaze, now extended to every enemy type. Checked as a bounding-box overlap
@@ -174,12 +195,12 @@ export class CollisionSystem {
   }
 
   // A kamikaze that touches a building destroys it immediately, per Mike's request — regardless of
-  // remaining HP — and the kamikaze goes with it (see Game.explodeKamikazeIntoBuilding). The
-  // building's footprint/altitude test is the same box the ship's own ram-a-building check uses
-  // (RAM_DAMAGES_BUILDINGS, below), just without that check's extra edge/roof tolerances — a
-  // kamikaze is small, so its own x/y is close enough. In practice this only ever fires during an
-  // actual attack run: idle patrol sits well above rooftop height (see Kamikaze's spawnY), so a
-  // kamikaze can't stumble into a building just by wandering.
+  // remaining HP — and the kamikaze goes with it (see Game.explodeKamikazeIntoBuilding). Unlike the
+  // ship's own ram-a-building check (below), this one isn't gated behind game.steve — the building's
+  // footprint/altitude test is the same box that check uses, just without its extra edge/roof
+  // tolerances — a kamikaze is small, so its own x/y is close enough. In practice this only ever fires
+  // during an actual attack run: idle patrol sits well above rooftop height (see Kamikaze's spawnY),
+  // so a kamikaze can't stumble into a building just by wandering.
   _kamikazesVsBuildings(game){
     for(const k of game.kamikazes){
       if(!k.alive) continue;
@@ -229,10 +250,11 @@ export class CollisionSystem {
         eb.dead = true; game.loseLife();
       }
     }
-    // ramming a building: destroys the ship (same life-loss/respawn as any other hit) and damages
-    // the building it hit, using the same damage model bombs use — configurable, off by default
-    // (see RAM_DAMAGES_BUILDINGS)
-    if(RAM_DAMAGES_BUILDINGS){
+    // ramming a building: destroys the ship (same life-loss/respawn as any other hit) and destroys
+    // the building it hit — one of Steve's house rules, off by default, on behind ?steve=true (see
+    // Game.steve). With it off, buildings simply aren't solid to the ship — see Ship.js's landing
+    // logic for how it relies on that.
+    if(game.steve){
       for(const bld of game.buildings){
         if(bld.destroyed) continue;
         const roofY = GROUND_Y - bld.height;
